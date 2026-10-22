@@ -1,0 +1,184 @@
+{% extends "admin/base.html" %} {% block title %}Edit Material - Admin{%
+endblock %} {% block page_title %}Edit Material{% endblock %} {% block extra_js
+%}
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const fileInput = document.getElementById("file");
+    const fileName = document.getElementById("fileName");
+    const fileSize = document.getElementById("fileSize");
+    const uploadProgress = document.getElementById("uploadProgress");
+    const progressBar = document.getElementById("progressBar");
+
+    if (fileInput) {
+      fileInput.addEventListener("change", function () {
+        if (this.files && this.files[0]) {
+          const file = this.files[0];
+          fileName.textContent = file.name;
+          fileSize.textContent = (file.size / 1024 / 1024).toFixed(2) + " MB";
+          uploadProgress.style.display = "block";
+          let width = 0;
+          const interval = setInterval(function () {
+            if (width >= 100) {
+              clearInterval(interval);
+              return;
+            }
+            width += Math.random() * 30;
+            if (width > 100) width = 100;
+            progressBar.style.width = width + "%";
+          }, 200);
+        }
+      });
+    }
+  });
+</script>
+{% endblock %} {% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-8">
+    <div class="card">
+      <div class="card-body">
+        <form
+          method="POST"
+          action="{{ url_for('admin.edit_material', material_id=material.id) }}"
+          enctype="multipart/form-data"
+          novalidate
+        >
+                {{ csrf_input() }}
+          <div class="mb-3">
+            <label for="title" class="form-label"
+              >Title <span class="text-danger">*</span></label
+            >
+            <input
+              type="text"
+              class="form-control"
+              id="title"
+              name="title"
+              value="{{ material.title }}"
+              required
+              autofocus
+            />
+          </div>
+          <div class="mb-3">
+            <label for="description" class="form-label">Description</label>
+            <textarea
+              class="form-control"
+              id="description"
+              name="description"
+              rows="3"
+            >
+{{ material.description }}</textarea
+            >
+          </div>
+          <div class="mb-3">
+            <label for="subject_id" class="form-label"
+              >Subject <span class="text-danger">*</span></label
+            >
+            <select
+              class="form-select"
+              id="subject_id"
+              name="subject_id"
+              required
+            >
+              <option value="">Select Subject</option>
+              {% for s in all_subjects %}
+              <option
+                value="{{ s.id }}"
+                {% if material.subject_id == s.id %}selected{% endif %}
+              >
+                {{ s.name }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="mb-3">
+            <label for="category_id" class="form-label"
+              >Category <span class="text-danger">*</span></label
+            >
+            <select
+              class="form-select"
+              id="category_id"
+              name="category_id"
+              required
+            >
+              <option value="">Select Category</option>
+              {% for c in all_categories %}
+              <option
+                value="{{ c.id }}"
+                {% if material.category_id == c.id %}selected{% endif %}
+              >
+                {{ c.name }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Current File</label>
+            <div class="d-flex align-items-center gap-2">
+              <i class="fas fa-file text-primary"></i>
+              <span>{{ material.file_name }}</span>
+              <span class="badge bg-light text-dark"
+                >{{ material.file_size|default(0)|filesizeformat }}</span
+              >
+            </div>
+          </div>
+          <div class="mb-3">
+            <label for="file" class="form-label">Replace File (optional)</label>
+            <input type="file" class="form-control" id="file" name="file" />
+            <div id="fileName" class="mt-2 fw-semibold"></div>
+            <div id="fileSize" class="small text-muted"></div>
+            <div id="uploadProgress" class="mt-2" style="display: none">
+              <div class="progress-bar-custom">
+                <div
+                  class="progress-fill bg-primary"
+                  id="progressBar"
+                  style="width: 0%"
+                ></div>
+              </div>
+            </div>
+            <div class="form-text">
+              <strong>Allowed file types:</strong> PDF, DOC, DOCX, PPT, PPTX,
+              ZIP, TXT
+            </div>
+          </div>
+          <div class="mb-3 form-check form-switch">
+            <input
+              class="form-check-input"
+              type="checkbox"
+              id="is_featured"
+              name="is_featured"
+              value="1"
+              {% if material.is_featured %}checked{% endif %}
+            />
+            <label class="form-check-label" for="is_featured"
+              >Featured Material</label
+            >
+          </div>
+          <div class="mb-3">
+            <label for="is_active" class="form-label">Status</label>
+            <select class="form-select" id="is_active" name="is_active">
+              <option value="1" {% if material.is_active %}selected{% endif %}>
+                Active
+              </option>
+              <option
+                value="0"
+              {% if not material.is_active %}selected{% endif %}
+              >
+                Inactive
+              </option>
+            </select>
+          </div>
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary">
+              <i class="fas fa-save me-2"></i>Update Material
+            </button>
+            <a
+              href="{{ url_for('admin.materials_list') }}"
+              class="btn btn-outline-secondary"
+              >Cancel</a
+            >
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

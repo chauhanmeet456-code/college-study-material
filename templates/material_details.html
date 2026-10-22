@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}{{ material.title }} - StudyHub{% endblock %}
+{% block content %}
+<div class="container py-4 fade-in">
+    {% if not current_user and remaining_views is not none and remaining_views <= 0 %}
+    <div class="alert alert-warning d-flex align-items-center" role="alert">
+        <i class="fas fa-exclamation-triangle me-2 fs-5"></i>
+        <div>
+            You have reached the free preview limit. <a href="{{ url_for('auth.login') }}" class="alert-link">Login</a> or <a href="{{ url_for('auth.register') }}" class="alert-link">Register</a> for unlimited access.
+        </div>
+    </div>
+    {% endif %}
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="d-flex align-items-start mb-3">
+                <div class="category-icon bg-primary bg-opacity-10 text-primary-custom me-3" style="margin:0;width:50px;height:50px;font-size:1.25rem;"><i class="fas fa-file-alt"></i></div>
+                <div class="flex-grow-1">
+                    <h2 class="fw-bold mb-1">{{ material.title }}</h2>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <a href="{{ url_for('main.subject_details', subject_id=subject.id) }}" class="badge bg-primary bg-opacity-10 text-primary-custom text-decoration-none">{{ subject.name }}</a>
+                        {% if material.category_name %}
+                            <span class="badge bg-info bg-opacity-10 text-info">{{ material.category_name }}</span>
+                        {% endif %}
+                        {% if material.file_type %}
+                            <span class="badge bg-secondary bg-opacity-10 text-secondary">{{ material.file_type }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            <p class="text-secondary mb-3">{{ material.description }}</p>
+            <div class="row g-3 text-sm">
+                <div class="col-sm-6 col-md-3">
+                    <small class="text-muted d-block">File Name</small>
+                    <span class="fw-medium">{{ material.file_name }}</span>
+                </div>
+                <div class="col-sm-6 col-md-3">
+                    <small class="text-muted d-block">File Size</small>
+                    <span class="fw-medium">{{ material.file_size|default('N/A') }}</span>
+                </div>
+                <div class="col-sm-6 col-md-3">
+                    <small class="text-muted d-block">Views</small>
+                    <span class="fw-medium"><i class="fas fa-eye me-1"></i>{{ material.view_count }}</span>
+                </div>
+                <div class="col-sm-6 col-md-3">
+                    <small class="text-muted d-block">Downloads</small>
+                    <span class="fw-medium"><i class="fas fa-download me-1"></i>{{ material.download_count }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="d-flex gap-2 flex-wrap">
+        {% if is_video %}
+        <a href="{{ url_for('main.view_material', material_id=material.id) }}" class="btn btn-primary" target="_blank">
+            <i class="fas fa-play me-1"></i>Play Video
+        </a>
+        {% else %}
+        <a href="{{ url_for('main.view_material', material_id=material.id) }}" class="btn btn-primary" target="_blank">
+            <i class="fas fa-eye me-1"></i>View
+        </a>
+        {% endif %}
+        <a href="{{ url_for('main.download_material', material_id=material.id) }}" class="btn btn-success">
+            <i class="fas fa-download me-1"></i>Download
+        </a>
+        {% if current_user %}
+            <button class="btn btn-outline-danger" onclick="toggleFavorite({{ material.id }})">
+                <i class="{% if material.is_favorited %}fas{% else %}far{% endif %} fa-heart me-1" id="fav-icon-{{ material.id }}"></i>
+                <span id="fav-text-{{ material.id }}">{% if material.is_favorited %}Remove from Favorites{% else %}Add to Favorites{% endif %}</span>
+            </button>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+    function toggleFavorite(materialId) {
+        fetch('/api/favorites/' + materialId, { method: 'POST', headers: { 'X-CSRFToken': '{{ csrf_token() if csrf_token else "" }}' } })
+            .then(r => r.json()).then(data => {
+                const icon = document.getElementById('fav-icon-' + materialId);
+                const text = document.getElementById('fav-text-' + materialId);
+                if (data.added) { icon.className = 'fas fa-heart me-1'; text.textContent = 'Remove from Favorites'; }
+                else { icon.className = 'far fa-heart me-1'; text.textContent = 'Add to Favorites'; }
+            });
+    }
+</script>
+{% endblock %}

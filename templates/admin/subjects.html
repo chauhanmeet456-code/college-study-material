@@ -1,0 +1,188 @@
+{% extends "admin/base.html" %} {% block title %}Subjects - Admin{% endblock %}
+{% block page_title %}Subjects{% endblock %} {% block content %}
+<div
+  class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4"
+>
+  <div>
+    <h4 class="fw-bold mb-0">All Subjects</h4>
+    <p class="text-muted mb-0">Manage your course subjects.</p>
+  </div>
+  <a href="{{ url_for('admin.add_subject') }}" class="btn btn-primary">
+    <i class="fas fa-plus me-2"></i>Add Subject
+  </a>
+</div>
+
+<div class="card mb-3">
+      <div class="card-body">
+        <form
+          method="GET"
+          action="{{ url_for('admin.subjects_list') }}"
+          class="row g-2 align-items-end"
+        >
+          <div class="col-sm-6 col-md-4">
+            <label class="form-label small fw-semibold text-muted">Search</label>
+            <input
+              type="text"
+              name="search"
+              class="form-control"
+              placeholder="Search by name or code..."
+              value="{{ search }}"
+            />
+          </div>
+          <div class="col-sm-4 col-md-3">
+            <label class="form-label small fw-semibold text-muted">Status</label>
+            <select name="status" class="form-select">
+              <option value="all" {% if status == 'all' %}selected{% endif %}>All</option>
+              <option value="active" {% if status == 'active' %}selected{% endif %}>Active</option>
+              <option value="inactive" {% if status == 'inactive' %}selected{% endif %}>Inactive</option>
+            </select>
+          </div>
+          <div class="col-sm-2 col-md-2">
+            <button type="submit" class="btn btn-primary w-100">
+              <i class="fas fa-search"></i>
+            </button>
+          </div>
+          <div class="col-sm-2 col-md-1">
+            <a
+              href="{{ url_for('admin.subjects_list') }}"
+              class="btn btn-outline-secondary w-100"
+              >Reset</a
+            >
+          </div>
+        </form>
+      </div>
+    </div>
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Code</th>
+          <th class="d-none d-md-table-cell">Description</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if subjects %} {% for subject in subjects %}
+        <tr>
+          <td>
+            <div class="d-flex align-items-center gap-2">
+              <i
+                class="fas {{ subject.icon|default('fa-book') }} text-primary"
+              ></i>
+              <span class="fw-semibold">{{ subject.name }}</span>
+            </div>
+          </td>
+          <td>
+            <span class="badge bg-light text-dark">{{ subject.code }}</span>
+          </td>
+          <td class="d-none d-md-table-cell text-muted">
+            {{ subject.description|truncate(60) if subject.description else '-'
+            }}
+          </td>
+          <td>
+            {% if subject.is_active %}
+            <span class="badge bg-success bg-opacity-10 text-success"
+              >Active</span
+            >
+            {% else %}
+            <span class="badge bg-danger bg-opacity-10 text-danger"
+              >Inactive</span
+            >
+            {% endif %}
+          </td>
+          <td>
+            <div class="d-flex gap-1">
+              <a
+                href="{{ url_for('admin.edit_subject', subject_id=subject.id) }}"
+                class="btn btn-sm btn-outline-primary"
+                title="Edit"
+              >
+                <i class="fas fa-edit"></i>
+              </a>
+              <form
+                method="POST"
+                action="{{ url_for('admin.delete_subject', subject_id=subject.id) }}"
+                onsubmit="return confirm('Are you sure?');"
+              >
+                {{ csrf_input() }}
+                <button
+                  type="submit"
+                  class="btn btn-sm btn-outline-danger"
+                  title="Delete"
+                >
+                  <i class="fas fa-trash"></i>
+                </button>
+              </form>
+              <form
+                method="POST"
+                action="{{ url_for('admin.edit_subject', subject_id=subject.id) }}"
+                class="d-inline"
+              >
+                {{ csrf_input() }}
+                <input
+                  type="hidden"
+                  name="is_active"
+                  value="{{ 0 if subject.is_active else 1 }}"
+                />
+                <input type="hidden" name="name" value="{{ subject.name }}" />
+                <input type="hidden" name="code" value="{{ subject.code }}" />
+                <input
+                  type="hidden"
+                  name="description"
+                  value="{{ subject.description }}"
+                />
+                <input type="hidden" name="icon" value="{{ subject.icon }}" />
+                <button
+                  type="submit"
+                  class="btn btn-sm btn-outline-{{ 'warning' if subject.is_active else 'success' }}"
+                  title="{{ 'Deactivate' if subject.is_active else 'Activate' }}"
+                >
+                  <i
+                    class="fas fa-{{ 'ban' if subject.is_active else 'check' }}"
+                  ></i>
+                </button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %} {% else %}
+        <tr>
+          <td colspan="5" class="text-center py-5 text-muted">
+            <i class="fas fa-inbox fa-2x mb-2 d-block"></i>
+            No subjects found.
+          </td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+  {% if total > 10 %}
+  <div
+    class="card-footer bg-transparent border-0 d-flex justify-content-between align-items-center"
+  >
+    <span class="text-muted small"
+      >Showing {{ ((page - 1) * 10) + 1 }} to {{ page * 10 if page * 10 < total else total }} of {{
+      total }}</span
+    >
+    <nav>
+      <ul class="pagination pagination-sm mb-0">
+        {% set total_pages = (total / 10) | int + (1 if total % 10 else 0) %} {%
+        for p in range(1, total_pages + 1) %}
+        <li class="page-item {% if p == page %}active{% endif %}">
+          <a
+            class="page-link"
+            href="?page={{ p }}&search={{ search }}&status={{ status }}"
+            >{{ p }}</a
+          >
+        </li>
+        {% endfor %}
+      </ul>
+    </nav>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

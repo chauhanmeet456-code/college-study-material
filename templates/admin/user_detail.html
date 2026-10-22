@@ -1,0 +1,207 @@
+{% extends "admin/base.html" %} {% block title %}User Details - Admin{% endblock
+%} {% block page_title %}User Details{% endblock %} {% block content %}
+<div class="d-flex align-items-center gap-2 mb-3">
+  <a
+    href="{{ url_for('admin.users_list') }}"
+    class="btn btn-outline-secondary btn-sm"
+  >
+    <i class="fas fa-arrow-left"></i> Back
+  </a>
+</div>
+
+<div class="row g-3">
+  <div class="col-md-4">
+    <div class="card h-100">
+      <div class="card-body text-center">
+        <div class="mb-3">
+          {% if user.profile_image and user.profile_image != 'default.png' %}
+          <img
+            src="{{ url_for('static', filename='uploads/' + user.profile_image) }}"
+            class="rounded-circle"
+            style="
+              width: 100px;
+              height: 100px;
+              object-fit: cover;
+              border: 3px solid var(--primary);
+            "
+          />
+          {% else %}
+          <div
+            class="avatar-circle bg-primary text-white d-flex align-items-center justify-content-center mx-auto"
+            style="
+              width: 100px;
+              height: 100px;
+              border-radius: 50%;
+              font-weight: 700;
+              font-size: 2.5rem;
+            "
+          >
+            {{ user.name[0]|upper }}
+          </div>
+          {% endif %}
+        </div>
+        <h4 class="fw-bold mb-1">{{ user.name }}</h4>
+        <p class="text-muted mb-2">{{ user.email }}</p>
+        <div class="d-flex justify-content-center gap-2 mb-3">
+          {% if user.is_active %}
+          <span class="badge bg-success bg-opacity-10 text-success"
+            >Active</span
+          >
+          {% else %}
+          <span class="badge bg-danger bg-opacity-10 text-danger"
+            >Inactive</span
+          >
+          {% endif %}
+        </div>
+        <div class="text-start small text-muted">
+          <div class="d-flex justify-content-between py-2 border-bottom">
+            <span>User ID</span>
+            <span class="fw-semibold text-primary">{{ user.id }}</span>
+          </div>
+          <div class="d-flex justify-content-between py-2 border-bottom">
+            <span>Registered</span>
+            <span class="fw-semibold"
+              >{{ user.created_at|default('N/A') }}</span
+            >
+          </div>
+          <div class="d-flex justify-content-between py-2 border-bottom">
+            <span>Last Login</span>
+            <span class="fw-semibold"
+              >{{ user.last_login|default('Never') }}</span
+            >
+          </div>
+          <div class="d-flex justify-content-between py-2">
+            <span>Profile Image</span>
+            <span class="fw-semibold"
+              >{{ user.profile_image|default('default.png') }}</span
+            >
+          </div>
+        </div>
+        <div class="mt-3 d-flex gap-2 justify-content-center">
+          {% if user.is_active %}
+          <a
+            href="{{ url_for('admin.deactivate_user', user_id=user.id) }}"
+            class="btn btn-outline-warning btn-sm"
+            >Deactivate</a
+          >
+          {% else %}
+          <a
+            href="{{ url_for('admin.activate_user', user_id=user.id) }}"
+            class="btn btn-outline-success btn-sm"
+            >Activate</a
+          >
+          {% endif %}
+          <form
+            method="POST"
+            action="{{ url_for('admin.delete_user', user_id=user.id) }}"
+            onsubmit="return confirm('Delete this user permanently?');"
+          >
+                {{ csrf_input() }}
+            <button type="submit" class="btn btn-outline-danger btn-sm">
+              Delete
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-8">
+    <div class="card mb-3">
+      <div class="card-body">
+        <h5 class="fw-bold mb-3">Saved Favorites</h5>
+        {% if favorites %}
+        <div class="table-responsive">
+          <table class="table table-sm mb-0">
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Subject</th>
+                <th>Category</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for fav in favorites %}
+              <tr>
+                <td>{{ fav.title }}</td>
+                <td>{{ fav.subject_name }}</td>
+                <td>{{ fav.category_name }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="text-center text-muted py-4">
+          <i class="fas fa-heart fa-2x mb-2 d-block"></i>
+          No favorites saved by this user.
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <span class="fw-semibold"
+          ><i class="fas fa-shield-alt me-2"></i>Login History</span
+        >
+        <div class="d-flex gap-2">
+          <a
+            href="{{ url_for('admin.user_login_history', user_id=user.id) }}"
+            class="btn btn-outline-primary btn-sm"
+          >
+            <i class="fas fa-list me-1"></i>Full history
+          </a>
+          {% if active_session %}
+          <form
+            method="POST"
+            action="{{ url_for('admin.revoke_all_user_sessions', user_id=user.id) }}"
+            onsubmit="return confirm('End every active session for this user?');"
+          >
+                {{ csrf_input() }}
+            {{ csrf_input() }}
+            <button type="submit" class="btn btn-outline-danger btn-sm">
+              <i class="fas fa-power-off me-1"></i>End all sessions
+            </button>
+          </form>
+          {% endif %}
+        </div>
+      </div>
+      <div class="card-body">
+        {% if active_session %}
+        <div class="border rounded p-3 mb-3">
+          <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+            <div>
+              <div class="fw-semibold small">
+                <i class="fas fa-desktop me-1 text-primary"></i>
+                {{ active_session.device_name|default('Unknown device') }}
+              </div>
+              <div class="text-muted" style="font-size: 0.8rem">
+                IP {{ active_session.ip_address|default('unknown') }}
+              </div>
+              <div class="text-muted" style="font-size: 0.8rem">
+                Started {{ active_session.created_at|default('unknown') }}
+              </div>
+            </div>
+            <form
+              method="POST"
+              action="{{ url_for('admin.revoke_user_session', user_id=user.id, session_id=active_session.id) }}"
+              onsubmit="return confirm('End this session? The user will be signed out on that device.');"
+            >
+                {{ csrf_input() }}
+              {{ csrf_input() }}
+              <button type="submit" class="btn btn-outline-danger btn-sm">
+                <i class="fas fa-power-off me-1"></i>End session
+              </button>
+            </form>
+          </div>
+        </div>
+        {% else %}
+        <p class="text-muted small mb-0">
+          No active sessions for this user.
+        </p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

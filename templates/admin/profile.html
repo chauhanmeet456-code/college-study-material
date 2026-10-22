@@ -1,0 +1,147 @@
+{% extends "admin/base.html" %} {% block title %}Admin Profile - Admin{%
+endblock %} {% block page_title %}Admin Profile{% endblock %} {% block content
+%}
+<div class="row">
+  <div class="col-lg-4">
+    <div class="card mb-3">
+      <div class="card-body text-center">
+        <div
+          class="avatar-circle bg-primary text-white d-flex align-items-center justify-content-center mx-auto mb-3"
+          style="
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            font-weight: 700;
+            font-size: 2.5rem;
+          "
+        >
+          {{ admin.name[0]|upper }}
+        </div>
+        <h5 class="fw-bold mb-1">{{ admin.name }}</h5>
+        <p class="text-muted mb-0">@{{ admin.username }}</p>
+        <p class="text-muted mb-0">{{ admin.email }}</p>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-body">
+        <h6 class="fw-semibold mb-3">Account Info</h6>
+        <div class="d-flex justify-content-between mb-2">
+          <span class="text-muted">Role</span>
+          <span class="fw-semibold">Administrator</span>
+        </div>
+        <div class="d-flex justify-content-between mb-2">
+          <span class="text-muted">Status</span>
+          <span class="badge bg-success bg-opacity-10 text-success"
+            >Active</span
+          >
+        </div>
+        <div class="d-flex justify-content-between">
+          <span class="text-muted">Last Login</span>
+          <span class="fw-semibold">{{ admin.last_login|default('N/A') }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-8">
+    <div class="card mb-3">
+      <div class="card-header bg-transparent border-0 pt-3 px-3">
+        <h6 class="fw-semibold mb-0">Edit Profile</h6>
+      </div>
+      <div class="card-body">
+        <form method="POST" action="{{ url_for('admin.profile') }}" novalidate>
+                {{ csrf_input() }}
+          <div class="mb-3">
+            <label for="name" class="form-label">Full Name</label>
+            <input
+              type="text"
+              class="form-control"
+              id="name"
+              name="name"
+              value="{{ admin.name }}"
+              required
+            />
+          </div>
+          <div class="mb-3">
+            <label for="email" class="form-label">Email</label>
+            <input
+              type="email"
+              class="form-control"
+              id="email"
+              name="email"
+              value="{{ admin.email }}"
+              required
+            />
+          </div>
+          <div class="mb-3">
+            <label for="username" class="form-label">Username</label>
+            <input
+              type="text"
+              class="form-control"
+              id="username"
+              name="username"
+              value="{{ admin.username }}"
+              required
+            />
+          </div>
+          <button type="submit" class="btn btn-primary">
+            <i class="fas fa-save me-2"></i>Update Profile
+          </button>
+        </form>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header bg-transparent border-0 pt-3 px-3">
+        <h6 class="fw-semibold mb-0">Change Password</h6>
+      </div>
+      <div class="card-body">
+        <form
+          method="POST"
+          action="{{ url_for('admin.change_admin_password') }}"
+          novalidate
+        >
+                {{ csrf_input() }}
+          <div class="mb-3">
+            <label for="current_password" class="form-label"
+              >Current Password</label
+            >
+            <input
+              type="password"
+              class="form-control"
+              id="current_password"
+              name="current_password"
+              required
+            />
+          </div>
+          <div class="mb-3">
+            <label for="new_password" class="form-label">New Password</label>
+            <input
+              type="password"
+              class="form-control"
+              id="new_password"
+              name="new_password"
+              required
+              minlength="6"
+            />
+          </div>
+          <div class="mb-3">
+            <label for="confirm_password" class="form-label"
+              >Confirm New Password</label
+            >
+            <input
+              type="password"
+              class="form-control"
+              id="confirm_password"
+              name="confirm_password"
+              required
+              minlength="6"
+            />
+          </div>
+          <button type="submit" class="btn btn-primary">
+            <i class="fas fa-key me-2"></i>Change Password
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

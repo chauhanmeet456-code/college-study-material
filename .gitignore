@@ -1,0 +1,12 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+instance/
+static/uploads/*
+!static/uploads/.gitkeep
+.DS_Store
+Thumbs.db
+*.sqlite3
+*.db

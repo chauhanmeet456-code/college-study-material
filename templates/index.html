@@ -1,0 +1,345 @@
+{% extends "base.html" %}
+{% block title %}Home - {{ settings.get('site_name', 'College Study Material') }}{% endblock %}
+{% block extra_css %}
+<style>
+    .hero-section {
+        background: linear-gradient(135deg, #2563eb 0%, #7c3aed 50%, #0891b2 100%);
+        color: white;
+        padding: 4rem 0;
+        border-radius: var(--radius-xl);
+        position: relative;
+        overflow: hidden;
+    }
+    .hero-section::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        right: -20%;
+        width: 600px;
+        height: 600px;
+        background: rgba(255,255,255,0.05);
+        border-radius: 50%;
+    }
+    .hero-section::after {
+        content: '';
+        position: absolute;
+        bottom: -30%;
+        left: -10%;
+        width: 400px;
+        height: 400px;
+        background: rgba(255,255,255,0.03);
+        border-radius: 50%;
+    }
+    .hero-content { position: relative; z-index: 2; }
+    .hero-section h1 { font-weight: 800; font-size: 2.5rem; line-height: 1.2; }
+    .hero-section .lead { font-size: 1.15rem; opacity: 0.95; }
+    .btn-hero-primary {
+        background: white;
+        color: var(--primary);
+        border: none;
+        font-weight: 600;
+        padding: 0.85rem 2rem;
+        border-radius: var(--radius-lg);
+    }
+    .btn-hero-primary:hover {
+        background: #f1f5f9;
+        color: var(--primary-dark);
+        transform: translateY(-2px);
+        box-shadow: var(--shadow-lg);
+    }
+    .btn-hero-outline {
+        background: transparent;
+        color: white;
+        border: 2px solid rgba(255,255,255,0.4);
+        font-weight: 600;
+        padding: 0.85rem 2rem;
+        border-radius: var(--radius-lg);
+    }
+    .btn-hero-outline:hover {
+        background: rgba(255,255,255,0.1);
+        border-color: white;
+        color: white;
+        transform: translateY(-2px);
+    }
+    .stat-card {
+        text-align: center;
+        padding: 1.5rem;
+        border-radius: var(--radius-lg);
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        box-shadow: var(--shadow);
+        transition: all 0.3s ease;
+    }
+    .stat-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); }
+    .stat-icon {
+        width: 50px;
+        height: 50px;
+        border-radius: var(--radius);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.25rem;
+        margin: 0 auto 0.75rem;
+    }
+    .stat-number { font-size: 2rem; font-weight: 700; color: var(--primary); }
+    .stat-label { color: var(--text-secondary); font-size: 0.85rem; font-weight: 500; }
+    .material-card .card-img-top {
+        height: 160px;
+        object-fit: cover;
+        background: linear-gradient(135deg, var(--primary-light) 0%, #f3e8ff 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 3rem;
+        color: var(--primary);
+    }
+    body.dark-mode .material-card .card-img-top {
+        background: linear-gradient(135deg, #1e3a5f 0%, #3b1f6e 100%);
+    }
+    .announcement-bar {
+        background: linear-gradient(90deg, #d97706 0%, #f59e0b 100%);
+        color: white;
+        padding: 0.6rem 0;
+        font-size: 0.9rem;
+        font-weight: 500;
+    }
+    .announcement-bar i { margin-right: 8px; }
+    .category-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-lg);
+        padding: 1.25rem;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        text-decoration: none;
+        display: block;
+    }
+    .category-card:hover {
+        transform: translateY(-3px);
+        box-shadow: var(--shadow-md);
+        border-color: var(--primary);
+    }
+    .category-icon {
+        width: 50px;
+        height: 50px;
+        border-radius: var(--radius);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.25rem;
+        margin: 0 auto 0.75rem;
+    }
+    .section-title {
+        font-weight: 700;
+        margin-bottom: 1.5rem;
+        position: relative;
+        display: inline-block;
+    }
+    .section-title::after {
+        content: '';
+        position: absolute;
+        bottom: -4px;
+        left: 0;
+        width: 50%;
+        height: 3px;
+        background: var(--primary);
+        border-radius: 2px;
+    }
+    .search-hero .form-control {
+        padding: 0.9rem 1.25rem;
+        font-size: 1.05rem;
+        border-radius: var(--radius-xl) 0 0 var(--radius-xl);
+        border: none;
+    }
+    .search-hero .btn {
+        padding: 0.9rem 1.5rem;
+        border-radius: 0 var(--radius-xl) var(--radius-xl) 0;
+        font-weight: 600;
+    }
+    @media (max-width: 768px) {
+        .hero-section h1 { font-size: 1.75rem; }
+        .hero-section { padding: 2.5rem 0; }
+        .hero-section .lead { font-size: 1rem; }
+    }
+    @media (max-width: 576px) {
+        .hero-section h1 { font-size: 1.4rem; }
+        .hero-section { padding: 1.5rem 0; }
+        .btn-hero-primary, .btn-hero-outline { padding: 0.6rem 1.2rem; font-size: 0.9rem; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container fade-in">
+    <div class="hero-section text-center mb-4">
+        <div class="hero-content">
+            <h1 class="mb-3">All Your 3rd Year Study Material in One Place</h1>
+            <p class="lead mb-4 mx-auto" style="max-width:600px;">Access notes, assignments, books, practicals, question papers and more. Everything you need to ace your exams.</p>
+            <form class="search-hero d-flex mx-auto mb-4" action="{{ url_for('main.search') }}" method="GET" style="max-width:550px;">
+                <input type="text" class="form-control" name="q" placeholder="Search for notes, books, assignments..." required>
+                <button type="submit" class="btn btn-hero-primary"><i class="fas fa-search"></i></button>
+            </form>
+            <div class="d-flex gap-3 justify-content-center flex-wrap">
+                <a href="{{ url_for('main.subjects') }}" class="btn btn-hero-primary"><i class="fas fa-book-open me-2"></i>Browse Subjects</a>
+                <a href="{{ url_for('main.search') }}" class="btn btn-hero-outline"><i class="fas fa-search me-2"></i>Search Materials</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if announcements %}
+<div class="announcement-bar">
+    <div class="container">
+        <div class="d-flex align-items-center">
+            <i class="fas fa-bullhorn"></i>
+                        <span><strong>Announcement:</strong> {{ announcements[0].title }} - {{ announcements[0].description }}</span>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div class="container py-4 fade-in">
+    <div class="row g-3 mb-5">
+        <div class="col-6 col-md-3">
+            <div class="stat-card">
+                <div class="stat-icon bg-primary bg-opacity-10 text-primary-custom"><i class="fas fa-book"></i></div>
+                <div class="stat-number">{{ total_subjects }}</div>
+                <div class="stat-label">Subjects</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="stat-card">
+                <div class="stat-icon bg-success bg-opacity-10 text-success"><i class="fas fa-file-alt"></i></div>
+                <div class="stat-number">{{ total_materials }}</div>
+                <div class="stat-label">Materials</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="stat-card">
+                <div class="stat-icon bg-info bg-opacity-10 text-info"><i class="fas fa-sticky-note"></i></div>
+                <div class="stat-number">{{ total_notes }}</div>
+                <div class="stat-label">Notes</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="stat-card">
+                <div class="stat-icon bg-warning bg-opacity-10 text-warning"><i class="fas fa-users"></i></div>
+                <div class="stat-number">{{ total_students }}</div>
+                <div class="stat-label">Students</div>
+            </div>
+        </div>
+    </div>
+
+    <h2 class="section-title">Popular Subjects</h2>
+    <div class="row g-3 mb-5">
+        {% if subjects %}
+            {% for subject in subjects[:6] %}
+                <div class="col-md-4 col-lg-2">
+                    <a href="{{ url_for('main.subject_details', subject_id=subject.id) }}" class="category-card">
+                        <div class="category-icon bg-primary bg-opacity-10 text-primary-custom"><i class="fas fa-book"></i></div>
+                        <h6 class="fw-semibold mb-1">{{ subject.name }}</h6>
+                        <small class="text-muted">{{ subject.code }}</small>
+                    </a>
+                </div>
+            {% endfor %}
+        {% else %}
+            <div class="col-12 text-center py-5">
+                <i class="fas fa-inbox fs-1 text-muted mb-3"></i>
+                <p class="text-muted">No subjects available yet.</p>
+            </div>
+        {% endif %}
+    </div>
+
+    <h2 class="section-title">Latest Materials</h2>
+    <div class="row g-3 mb-5">
+        {% if latest_materials %}
+            {% for material in latest_materials %}
+                <div class="col-md-6 col-lg-4">
+                    <div class="card material-card h-100">
+                        <div class="card-img-top"><i class="fas fa-file-alt"></i></div>
+                        <div class="card-body d-flex flex-column">
+                            <h5 class="card-title">{{ material.title }}</h5>
+                            <p class="card-text small text-muted">{{ material.description[:80] }}{% if material.description|length > 80 %}...{% endif %}</p>
+                            <div class="mt-auto d-flex justify-content-between align-items-center">
+                                <small class="text-muted"><i class="fas fa-eye me-1"></i>{{ material.view_count }} views</small>
+                                <a href="{{ url_for('main.material_details', material_id=material.id) }}" class="btn btn-primary btn-sm">View</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        {% else %}
+            <div class="col-12 text-center py-5">
+                <i class="fas fa-inbox fs-1 text-muted mb-3"></i>
+                <p class="text-muted">No materials available yet.</p>
+            </div>
+        {% endif %}
+    </div>
+
+    <h2 class="section-title">Featured Materials</h2>
+    <div class="row g-3 mb-5">
+        {% if featured_materials %}
+            {% for material in featured_materials %}
+                <div class="col-md-6 col-lg-4">
+                    <div class="card material-card h-100 border-warning">
+                        <div class="card-img-top"><i class="fas fa-star text-warning"></i></div>
+                        <div class="card-body d-flex flex-column">
+                            <h5 class="card-title"><i class="fas fa-star text-warning me-1"></i>{{ material.title }}</h5>
+                            <p class="card-text small text-muted">{{ material.description[:80] }}{% if material.description|length > 80 %}...{% endif %}</p>
+                            <div class="mt-auto d-flex justify-content-between align-items-center">
+                                <small class="text-muted"><i class="fas fa-download me-1"></i>{{ material.download_count }} downloads</small>
+                                <a href="{{ url_for('main.material_details', material_id=material.id) }}" class="btn btn-primary btn-sm">View</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        {% else %}
+            <div class="col-12 text-center py-5">
+                <p class="text-muted">No featured materials yet.</p>
+            </div>
+        {% endif %}
+    </div>
+
+    <h2 class="section-title">Quick Access</h2>
+    <div class="row g-3 mb-5">
+        <div class="col-6 col-md-4 col-lg-2">
+            <a href="{{ url_for('main.notes_page') }}" class="category-card">
+                <div class="category-icon bg-primary bg-opacity-10 text-primary-custom"><i class="fas fa-sticky-note"></i></div>
+                <h6 class="fw-semibold mb-0">Notes</h6>
+            </a>
+        </div>
+        <div class="col-6 col-md-4 col-lg-2">
+            <a href="{{ url_for('main.assignments_page') }}" class="category-card">
+                <div class="category-icon bg-success bg-opacity-10 text-success"><i class="fas fa-tasks"></i></div>
+                <h6 class="fw-semibold mb-0">Assignments</h6>
+            </a>
+        </div>
+        <div class="col-6 col-md-4 col-lg-2">
+            <a href="{{ url_for('main.books_page') }}" class="category-card">
+                <div class="category-icon bg-info bg-opacity-10 text-info"><i class="fas fa-book"></i></div>
+                <h6 class="fw-semibold mb-0">Books</h6>
+            </a>
+        </div>
+        <div class="col-6 col-md-4 col-lg-2">
+            <a href="{{ url_for('main.practicals_page') }}" class="category-card">
+                <div class="category-icon bg-warning bg-opacity-10 text-warning"><i class="fas fa-flask"></i></div>
+                <h6 class="fw-semibold mb-0">Practicals</h6>
+            </a>
+        </div>
+        <div class="col-6 col-md-4 col-lg-2">
+            <a href="{{ url_for('main.question_papers_page') }}" class="category-card">
+                <div class="category-icon bg-danger bg-opacity-10 text-danger"><i class="fas fa-file-alt"></i></div>
+                <h6 class="fw-semibold mb-0">Question Papers</h6>
+            </a>
+        </div>
+        <div class="col-6 col-md-4 col-lg-2">
+            <a href="{{ url_for('main.important_questions_page') }}" class="category-card">
+                <div class="category-icon bg-purple bg-opacity-10 text-purple"><i class="fas fa-star"></i></div>
+                <h6 class="fw-semibold mb-0">Important Questions</h6>
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}

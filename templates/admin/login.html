@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="en" data-bs-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{% block title %}Admin Login - StudyHub{% endblock %}</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <link
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    {% block extra_css %}{% endblock %}
+    <style>
+      :root {
+        --primary: #1e293b;
+        --primary-dark: #0f172a;
+        --primary-light: #334155;
+        --accent: #3b82f6;
+        --bg-body: #f1f5f9;
+        --bg-card: #ffffff;
+        --bg-navbar: #1e293b;
+        --text-primary: #1e293b;
+        --text-secondary: #64748b;
+        --text-muted: #94a3b8;
+        --text-on-dark: #f8fafc;
+        --text-muted-on-dark: #94a3b8;
+        --border-color: #e2e8f0;
+        --shadow:
+          0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.06);
+        --shadow-lg:
+          0 20px 25px -5px rgba(0, 0, 0, 0.1),
+          0 8px 10px -6px rgba(0, 0, 0, 0.1);
+        --radius: 0.5rem;
+        --radius-lg: 0.75rem;
+      }
+      body.dark-mode {
+        --primary: #f8fafc;
+        --primary-dark: #e2e8f0;
+        --primary-light: #334155;
+        --accent: #60a5fa;
+        --bg-body: #0f172a;
+        --bg-card: #1e293b;
+        --bg-navbar: #0f172a;
+        --text-primary: #f1f5f9;
+        --text-secondary: #cbd5e1;
+        --text-muted: #64748b;
+        --text-on-dark: #f8fafc;
+        --text-muted-on-dark: #64748b;
+        --border-color: #334155;
+        --shadow:
+          0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -2px rgba(0, 0, 0, 0.2);
+        --shadow-lg:
+          0 20px 25px -5px rgba(0, 0, 0, 0.3),
+          0 8px 10px -6px rgba(0, 0, 0, 0.2);
+      }
+      * {
+        font-family:
+          "Inter",
+          system-ui,
+          -apple-system,
+          sans-serif;
+      }
+      body {
+        background-color: var(--bg-body);
+        color: var(--text-primary);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        transition:
+          background-color 0.3s ease,
+          color 0.3s ease;
+      }
+      .admin-navbar {
+        background-color: var(--bg-navbar);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        padding: 0.75rem 0;
+        transition: all 0.3s ease;
+      }
+      .admin-navbar .navbar-brand {
+        font-weight: 700;
+        color: var(--text-on-dark) !important;
+        font-size: 1.25rem;
+      }
+      .admin-navbar .navbar-brand i {
+        margin-right: 6px;
+      }
+      .admin-navbar .nav-link {
+        color: var(--text-muted-on-dark) !important;
+        font-weight: 500;
+        font-size: 0.9rem;
+        transition: color 0.2s ease;
+      }
+      .admin-navbar .nav-link:hover {
+        color: var(--text-on-dark) !important;
+      }
+      .admin-container {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem 1rem;
+        position: relative;
+        overflow: hidden;
+      }
+      .admin-container::before {
+        content: "";
+        position: absolute;
+        top: -50%;
+        right: -20%;
+        width: 600px;
+        height: 600px;
+        background: radial-gradient(circle, var(--accent) 0%, transparent 70%);
+        opacity: 0.08;
+        border-radius: 50%;
+        pointer-events: none;
+      }
+      .admin-container::after {
+        content: "";
+        position: absolute;
+        bottom: -30%;
+        left: -10%;
+        width: 500px;
+        height: 500px;
+        background: radial-gradient(circle, var(--accent) 0%, transparent 70%);
+        opacity: 0.06;
+        border-radius: 50%;
+        pointer-events: none;
+      }
+      .admin-card {
+        background-color: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-lg);
+        width: 100%;
+        max-width: 400px;
+        padding: 2.5rem;
+        transition: all 0.3s ease;
+        position: relative;
+        z-index: 1;
+      }
+      .admin-card .admin-header {
+        text-align: center;
+        margin-bottom: 2rem;
+      }
+      .admin-card .admin-header h2 {
+        font-weight: 700;
+        color: var(--text-primary);
+        margin-bottom: 0.5rem;
+      }
+      .admin-card .admin-header p {
+        color: var(--text-secondary);
+        margin-bottom: 0;
+        font-size: 0.9rem;
+      }
+      .admin-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        background-color: var(--primary-light);
+        color: var(--primary);
+        padding: 0.4rem 1rem;
+        border-radius: 2rem;
+        font-size: 0.8rem;
+        font-weight: 600;
+        margin-bottom: 1rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      body.dark-mode .admin-badge {
+        background-color: rgba(59, 130, 246, 0.15);
+        color: var(--accent);
+      }
+      .form-control,
+      .form-select {
+        background-color: var(--bg-card);
+        border-color: var(--border-color);
+        color: var(--text-primary);
+        padding: 0.75rem 1rem;
+        border-radius: var(--radius);
+        font-size: 0.95rem;
+        transition: all 0.2s ease;
+      }
+      .form-control:focus,
+      .form-select:focus {
+        background-color: var(--bg-card);
+        border-color: var(--accent);
+        color: var(--text-primary);
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+      }
+      .form-control::placeholder {
+        color: var(--text-muted);
+      }
+      .input-group-text {
+        background-color: var(--bg-card);
+        border-color: var(--border-color);
+        color: var(--text-secondary);
+      }
+      .btn-auth {
+        padding: 0.75rem;
+        font-weight: 600;
+        border-radius: var(--radius);
+        font-size: 1rem;
+        width: 100%;
+        background-color: var(--primary);
+        border-color: var(--primary);
+        color: #fff;
+        transition: all 0.2s ease;
+      }
+      .btn-auth:hover {
+        background-color: var(--primary-dark);
+        border-color: var(--primary-dark);
+        color: #fff;
+      }
+      body.dark-mode .btn-auth {
+        color: #0f172a;
+      }
+      body.dark-mode .btn-auth:hover {
+        color: #0f172a;
+      }
+      .admin-footer {
+        text-align: center;
+        margin-top: 1.5rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid var(--border-color);
+      }
+      .admin-footer p {
+        color: var(--text-secondary);
+        margin-bottom: 0;
+        font-size: 0.9rem;
+      }
+      .admin-footer a {
+        color: var(--accent);
+        text-decoration: none;
+        font-weight: 600;
+      }
+      .admin-footer a:hover {
+        text-decoration: underline;
+      }
+      .dark-mode-toggle {
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        color: var(--text-muted-on-dark);
+        width: 38px;
+        height: 38px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        font-size: 1rem;
+      }
+      .dark-mode-toggle:hover {
+        background: rgba(255, 255, 255, 0.2);
+        color: var(--text-on-dark);
+        border-color: rgba(255, 255, 255, 0.3);
+      }
+      footer {
+        background-color: var(--bg-card);
+        border-top: 1px solid var(--border-color);
+        padding: 1.5rem 0;
+        transition: all 0.3s ease;
+      }
+      footer p {
+        color: var(--text-secondary);
+        margin-bottom: 0;
+        font-size: 0.85rem;
+      }
+      footer a {
+        color: var(--text-secondary);
+        text-decoration: none;
+      }
+      footer a:hover {
+        color: var(--accent);
+      }
+      .flash-container {
+        position: fixed;
+        top: 80px;
+        right: 20px;
+        z-index: 1055;
+        max-width: 400px;
+      }
+      .alert {
+        border-radius: var(--radius);
+        border: none;
+        box-shadow: var(--shadow-md);
+        font-weight: 500;
+      }
+      .password-field {
+        position: relative;
+      }
+      .password-toggle {
+        position: absolute;
+        right: 0.75rem;
+        top: 50%;
+        transform: translateY(-50%);
+        background: none;
+        border: none;
+        color: var(--text-muted);
+        cursor: pointer;
+        z-index: 10;
+        font-size: 0.9rem;
+      }
+      .password-toggle:hover {
+        color: var(--text-secondary);
+      }
+      @media (max-width: 576px) {
+        .admin-card {
+          padding: 2rem 1.5rem;
+        }
+        .flash-container {
+          top: 70px;
+          right: 10px;
+          left: 10px;
+          max-width: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    {% with messages = get_flashed_messages(with_categories=true) %} {% if
+    messages %}
+    <div class="flash-container">
+      {% for category, message in messages %}
+      <div
+        class="alert alert-{{ category }} alert-dismissible fade show"
+        role="alert"
+      >
+        {% if category == 'success' %}<i class="fas fa-check-circle me-2"></i>{%
+        endif %} {% if category == 'danger' %}<i
+          class="fas fa-exclamation-circle me-2"
+        ></i
+        >{% endif %} {% if category == 'warning' %}<i
+          class="fas fa-exclamation-triangle me-2"
+        ></i
+        >{% endif %} {% if category == 'info' %}<i
+          class="fas fa-info-circle me-2"
+        ></i
+        >{% endif %} {{ message }}
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="alert"
+          aria-label="Close"
+        ></button>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %} {% endwith %}
+
+    <nav class="navbar navbar-expand admin-navbar">
+      <div class="container">
+        <a
+          class="navbar-brand"
+          href="{{ url_for('admin.dashboard') if session.get('admin_id') else '#' }}"
+        >
+          <i class="fas fa-shield-halved"></i> Admin Panel
+        </a>
+        <div class="ms-auto">
+          <button
+            class="dark-mode-toggle"
+            id="darkModeToggle"
+            title="Toggle dark mode"
+          >
+            <i class="fas fa-moon" id="darkModeIcon"></i>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <div class="admin-container">
+      <div class="admin-card">
+        <div class="admin-header">
+          <div class="admin-badge">
+            <i class="fas fa-user-shield"></i> Administrator
+          </div>
+          <h2>Admin Login</h2>
+          <p>Secure access to the administration dashboard.</p>
+        </div>
+
+        <form
+          method="POST"
+          action="{{ url_for('admin.admin_login') }}"
+          novalidate
+        >
+                {{ csrf_input() }}
+          {{ csrf_input() }}
+          <div class="mb-3">
+            <label for="username" class="form-label">Username or Email</label>
+            <div class="input-group">
+              <span class="input-group-text"
+                ><i class="fas fa-user-tie"></i
+              ></span>
+              <input
+                type="text"
+                class="form-control"
+                id="username"
+                name="username"
+                placeholder="admin or admin@studyhub.edu"
+                required
+                autofocus
+              />
+            </div>
+          </div>
+
+          <div class="mb-4">
+            <label for="password" class="form-label">Password</label>
+            <div class="input-group password-field">
+              <span class="input-group-text"><i class="fas fa-lock"></i></span>
+              <input
+                type="password"
+                class="form-control"
+                id="password"
+                name="password"
+                placeholder="Enter admin password"
+                required
+              />
+              <button
+                type="button"
+                class="password-toggle"
+                onclick="togglePassword('password', this)"
+              >
+                <i class="fas fa-eye"></i>
+              </button>
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn-auth">
+            <i class="fas fa-sign-in-alt me-2"></i>Login to Dashboard
+          </button>
+          <div class="text-center mt-3">
+            <a href="{{ url_for('admin.admin_forgot_password') }}" class="text-decoration-none">Forgot password?</a>
+          </div>
+        </form>
+
+        <div class="admin-footer">
+          <p>
+            Not an admin?
+            <a href="{{ url_for('auth.login') }}">Student login</a>
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      <div class="container text-center">
+        <p class="mb-0">
+          &copy; {{ now().year }} StudyHub. All rights reserved. Authorized
+          access only.
+        </p>
+      </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+      function togglePassword(fieldId, btn) {
+        const field = document.getElementById(fieldId);
+        const icon = btn.querySelector("i");
+        if (field.type === "password") {
+          field.type = "text";
+          icon.className = "fas fa-eye-slash";
+        } else {
+          field.type = "password";
+          icon.className = "fas fa-eye";
+        }
+      }
+
+      document.addEventListener("DOMContentLoaded", function () {
+        const toggleBtn = document.getElementById("darkModeToggle");
+        const icon = document.getElementById("darkModeIcon");
+        const body = document.body;
+        const stored = localStorage.getItem("darkMode");
+        if (stored === "true") {
+          body.classList.add("dark-mode");
+          icon.className = "fas fa-sun";
+          document.documentElement.setAttribute("data-bs-theme", "dark");
+        }
+        toggleBtn.addEventListener("click", function () {
+          body.classList.toggle("dark-mode");
+          const isDark = body.classList.contains("dark-mode");
+          localStorage.setItem("darkMode", isDark);
+          icon.className = isDark ? "fas fa-sun" : "fas fa-moon";
+          document.documentElement.setAttribute(
+            "data-bs-theme",
+            isDark ? "dark" : "light",
+          );
+        });
+        setTimeout(function () {
+          document
+            .querySelectorAll(".flash-container .alert")
+            .forEach(function (el) {
+              new bootstrap.Alert(el);
+              setTimeout(function () {
+                var alert = bootstrap.Alert.getOrCreateInstance(el);
+                if (alert) {
+                  alert.close();
+                }
+              }, 5000);
+            });
+        }, 100);
+      });
+    </script>
+  </body>
+</html>

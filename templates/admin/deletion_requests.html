@@ -1,0 +1,97 @@
+{% extends "admin/base.html" %} {% block title %}Deletion Requests - Admin{%
+endblock %} {% block page_title %}Account Deletion Requests{% endblock %} {%
+block content %}
+<div
+  class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4"
+>
+  <div>
+    <h4 class="fw-bold mb-0">Account Deletion Requests</h4>
+    <p class="text-muted mb-0">Users who requested to delete their accounts.</p>
+  </div>
+  <a href="{{ url_for('admin.users_list') }}" class="btn btn-outline-secondary">
+    <i class="fas fa-arrow-left me-2"></i>Back to Users
+  </a>
+</div>
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Email</th>
+          <th>Requested At</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if users %} {% for user in users %}
+        <tr>
+          <td>
+            <div class="d-flex align-items-center gap-2">
+              {% if user.profile_image and user.profile_image != 'default.png'
+              %}
+              <img
+                src="{{ url_for('static', filename='uploads/' + user.profile_image) }}"
+                class="rounded-circle"
+                style="width: 36px; height: 36px; object-fit: cover"
+              />
+              {% else %}
+              <div
+                class="avatar-circle bg-primary text-white d-flex align-items-center justify-content-center"
+                style="
+                  width: 36px;
+                  height: 36px;
+                  border-radius: 50%;
+                  font-weight: 600;
+                  font-size: 0.9rem;
+                "
+              >
+                {{ user.name[0]|upper }}
+              </div>
+              {% endif %}
+              <span class="fw-semibold">{{ user.name }}</span>
+            </div>
+          </td>
+          <td>{{ user.email }}</td>
+          <td>{{ user.deletion_requested_at|default('N/A') }}</td>
+          <td>
+            <div class="d-flex gap-1">
+              <form
+                method="POST"
+                action="{{ url_for('admin.delete_user', user_id=user.id) }}"
+                onsubmit="return confirm('Permanently delete this user and all their data?');"
+              >
+                {{ csrf_input() }}
+                <input type="hidden" name="next" value="{{ request.url }}">
+                <button
+                  type="submit"
+                  class="btn btn-sm btn-outline-danger"
+                  title="Delete Permanently"
+                >
+                  <i class="fas fa-trash"></i> Delete
+                </button>
+              </form>
+              <a
+                href="{{ url_for('admin.activate_user', user_id=user.id) }}"
+                class="btn btn-sm btn-outline-success"
+                title="Keep Account Active"
+              >
+                <i class="fas fa-check"></i> Keep
+              </a>
+            </div>
+          </td>
+        </tr>
+        {% endfor %} {% else %}
+        <tr>
+          <td colspan="4" class="text-center py-5 text-muted">
+            <i class="fas fa-check-circle fa-2x mb-2 d-block"></i>
+            No pending deletion requests.
+          </td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

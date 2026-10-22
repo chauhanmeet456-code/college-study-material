@@ -1,0 +1,588 @@
+<!doctype html>
+<html lang="en" data-bs-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <title>{% block title %}Admin - StudyHub{% endblock %}</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <link
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    {% block extra_css %}{% endblock %}
+    <style>
+      :root {
+        --sidebar-width: 260px;
+        --primary: #1e293b;
+        --primary-dark: #0f172a;
+        --primary-light: #334155;
+        --accent: #3b82f6;
+        --bg-body: #f1f5f9;
+        --bg-card: #ffffff;
+        --bg-sidebar: #1e293b;
+        --bg-sidebar-hover: #334155;
+        --bg-sidebar-active: #3b82f6;
+        --text-primary: #1e293b;
+        --text-secondary: #64748b;
+        --text-muted: #94a3b8;
+        --text-on-dark: #f8fafc;
+        --text-muted-on-dark: #94a3b8;
+        --border-color: #e2e8f0;
+        --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+        --shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06);
+        --shadow-md:
+          0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+        --shadow-lg:
+          0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+        --radius: 0.5rem;
+        --radius-lg: 0.75rem;
+      }
+      body.dark-mode {
+        --bg-body: #0f172a;
+        --bg-card: #1e293b;
+        --bg-sidebar: #0f172a;
+        --bg-sidebar-hover: #1e293b;
+        --bg-sidebar-active: #3b82f6;
+        --text-primary: #f1f5f9;
+        --text-secondary: #cbd5e1;
+        --text-muted: #64748b;
+        --border-color: #334155;
+        --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+        --shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+        --shadow-md:
+          0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -2px rgba(0, 0, 0, 0.2);
+        --shadow-lg:
+          0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -4px rgba(0, 0, 0, 0.2);
+      }
+      * {
+        font-family:
+          "Inter",
+          system-ui,
+          -apple-system,
+          sans-serif;
+      }
+      body {
+        background-color: var(--bg-body);
+        color: var(--text-primary);
+        min-height: 100vh;
+        transition:
+          background-color 0.3s ease,
+          color 0.3s ease;
+      }
+      .sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: var(--sidebar-width);
+        height: 100vh;
+        background-color: var(--bg-sidebar);
+        color: var(--text-on-dark);
+        overflow-y: auto;
+        z-index: 1040;
+        transition: transform 0.3s ease;
+        display: flex;
+        flex-direction: column;
+      }
+      .sidebar-brand {
+        padding: 1.25rem 1.5rem;
+        font-size: 1.25rem;
+        font-weight: 700;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        color: #fff;
+        text-decoration: none;
+      }
+      .sidebar-brand i {
+        color: var(--accent);
+      }
+      .sidebar-nav {
+        list-style: none;
+        padding: 1rem 0;
+        margin: 0;
+        flex: 1;
+      }
+      .sidebar-nav li {
+        margin: 0.15rem 0;
+      }
+      .sidebar-nav a {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.75rem 1.5rem;
+        color: var(--text-muted-on-dark);
+        text-decoration: none;
+        font-size: 0.9rem;
+        font-weight: 500;
+        transition: all 0.2s ease;
+        border-left: 3px solid transparent;
+      }
+      .sidebar-nav a:hover {
+        color: #fff;
+        background-color: var(--bg-sidebar-hover);
+      }
+      .sidebar-nav a.active {
+        color: #fff;
+        background-color: var(--bg-sidebar-active);
+        border-left-color: #fff;
+      }
+      .sidebar-nav a i {
+        width: 20px;
+        text-align: center;
+      }
+      .main-content {
+        margin-left: var(--sidebar-width);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        transition: margin-left 0.3s ease;
+      }
+      .top-header {
+        background-color: var(--bg-sidebar);
+        color: var(--text-on-dark);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        padding: 0.75rem 1.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        position: sticky;
+        top: 0;
+        z-index: 1030;
+      }
+      .top-header h5 {
+        color: #fff;
+      }
+      .top-header .header-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
+      .sidebar-toggle {
+        gap: 0.5rem;
+        font-weight: 600;
+        font-size: 0.9rem;
+        color: var(--text-primary);
+      }
+      .header-user i {
+        color: var(--text-muted);
+        font-size: 1.2rem;
+      }
+      .dark-mode-toggle {
+        background: none;
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
+        width: 38px;
+        height: 38px;
+        border-radius: var(--radius);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        font-size: 1rem;
+      }
+      .dark-mode-toggle:hover {
+        background-color: var(--primary-light);
+        color: var(--primary);
+        border-color: var(--primary);
+      }
+      .page-content {
+        flex: 1;
+        padding: 1.5rem;
+      }
+      .flash-container {
+        position: fixed;
+        top: 80px;
+        right: 20px;
+        z-index: 1055;
+        max-width: 400px;
+      }
+      .alert {
+        border-radius: var(--radius);
+        border: none;
+        box-shadow: var(--shadow-md);
+        font-weight: 500;
+      }
+      .card {
+        background-color: var(--bg-card);
+        border: 1px solid var(--border-color);
+        box-shadow: var(--shadow);
+        border-radius: var(--radius-lg);
+        transition: all 0.3s ease;
+      }
+      .table {
+        color: var(--text-primary);
+      }
+      .table thead th {
+        border-bottom: 2px solid var(--border-color);
+        font-weight: 600;
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: var(--text-secondary);
+        background-color: transparent;
+      }
+      .table tbody td {
+        border-color: var(--border-color);
+        vertical-align: middle;
+      }
+      .btn-primary {
+        background-color: var(--accent);
+        border-color: var(--accent);
+        font-weight: 500;
+      }
+      .btn-primary:hover {
+        background-color: #2563eb;
+        border-color: #2563eb;
+      }
+      .form-control,
+      .form-select {
+        background-color: var(--bg-card);
+        border-color: var(--border-color);
+        color: var(--text-primary);
+      }
+      .form-control:focus,
+      .form-select:focus {
+        background-color: var(--bg-card);
+        border-color: var(--accent);
+        color: var(--text-primary);
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+      }
+      .form-control::placeholder {
+        color: var(--text-muted);
+      }
+      .input-group-text {
+        background-color: var(--bg-card);
+        border-color: var(--border-color);
+        color: var(--text-secondary);
+      }
+      .sidebar-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background-color: rgba(0, 0, 0, 0.5);
+        z-index: 1035;
+      }
+      @media (max-width: 991.98px) {
+        .sidebar {
+          transform: translateX(-100%);
+        }
+        .sidebar.show {
+          transform: translateX(0);
+        }
+        .main-content {
+          margin-left: 0;
+        }
+        .sidebar-toggle {
+          display: flex;
+        }
+        .sidebar-overlay.show {
+          display: block;
+        }
+        .flash-container {
+          top: 70px;
+          right: 10px;
+          left: 10px;
+          max-width: none;
+        }
+      }
+      @media (max-width: 575.98px) {
+        .page-content { padding: 1rem; }
+        .top-header { padding: 0.5rem 1rem; }
+        .sidebar { width: 260px; }
+      }
+      .stat-card {
+        padding: 1.25rem;
+        border-radius: var(--radius-lg);
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        box-shadow: var(--shadow);
+        transition: all 0.3s ease;
+      }
+      .stat-card:hover {
+        transform: translateY(-2px);
+        box-shadow: var(--shadow-md);
+      }
+      .stat-icon {
+        width: 48px;
+        height: 48px;
+        border-radius: var(--radius);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.25rem;
+      }
+      .stat-number {
+        font-size: 1.75rem;
+        font-weight: 700;
+        color: var(--text-primary);
+        line-height: 1;
+      }
+      .stat-label {
+        color: var(--text-secondary);
+        font-size: 0.8rem;
+        font-weight: 500;
+        margin-top: 0.25rem;
+      }
+      .progress-bar-custom {
+        height: 8px;
+        border-radius: 4px;
+        background-color: var(--border-color);
+        overflow: hidden;
+      }
+      .progress-fill {
+        height: 100%;
+        border-radius: 4px;
+        transition: width 0.6s ease;
+      }
+      .breadcrumb {
+        background: transparent;
+        padding: 0;
+        margin-bottom: 1rem;
+      }
+      .breadcrumb-item a {
+        color: var(--text-secondary);
+        text-decoration: none;
+      }
+      .breadcrumb-item.active {
+        color: var(--text-primary);
+      }
+    </style>
+  </head>
+  <body>
+    {% with messages = get_flashed_messages(with_categories=true) %} {% if
+    messages %}
+    <div class="flash-container">
+      {% for category, message in messages %}
+      <div
+        class="alert alert-{{ category }} alert-dismissible fade show"
+        role="alert"
+      >
+        {% if category == 'success' %}<i class="fas fa-check-circle me-2"></i>{%
+        endif %} {% if category == 'danger' %}<i
+          class="fas fa-exclamation-circle me-2"
+        ></i
+        >{% endif %} {% if category == 'warning' %}<i
+          class="fas fa-exclamation-triangle me-2"
+        ></i
+        >{% endif %} {% if category == 'info' %}<i
+          class="fas fa-info-circle me-2"
+        ></i
+        >{% endif %} {{ message }}
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="alert"
+          aria-label="Close"
+        ></button>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %} {% endwith %}
+
+    {% if admin is defined %}
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+    <aside class="sidebar" id="sidebar">
+      <a href="{{ url_for('admin.dashboard') }}" class="sidebar-brand">
+        <i class="fas fa-shield-halved"></i> Admin Panel
+      </a>
+      <ul class="sidebar-nav">
+        <li>
+          <a
+            href="{{ url_for('admin.dashboard') }}"
+            class="{% if request.endpoint == 'admin.dashboard' %}active{% endif %}"
+          >
+            <i class="fas fa-tachometer-alt"></i> Dashboard
+          </a>
+        </li>
+        <li>
+          <a
+            href="{{ url_for('admin.subjects_list') }}"
+            class="{% if request.endpoint in ['admin.subjects_list', 'admin.add_subject', 'admin.edit_subject'] %}active{% endif %}"
+          >
+            <i class="fas fa-book"></i> Subjects
+          </a>
+        </li>
+        <li>
+          <a
+            href="{{ url_for('admin.materials_list') }}"
+            class="{% if request.endpoint in ['admin.materials_list', 'admin.add_material', 'admin.edit_material'] %}active{% endif %}"
+          >
+            <i class="fas fa-file-alt"></i> Materials
+          </a>
+        </li>
+        <li>
+          <a
+            href="{{ url_for('admin.categories_list') }}"
+            class="{% if request.endpoint == 'admin.categories_list' %}active{% endif %}"
+          >
+            <i class="fas fa-tags"></i> Categories
+          </a>
+        </li>
+        <li>
+          <a
+            href="{{ url_for('admin.users_list') }}"
+            class="{% if request.endpoint == 'admin.users_list' %}active{% endif %}"
+          >
+            <i class="fas fa-users"></i> Users
+          </a>
+        </li>
+        <li>
+          <a
+            href="{{ url_for('admin.messages_list') }}"
+            class="{% if request.endpoint in ['admin.messages_list', 'admin.view_message'] %}active{% endif %}"
+          >
+            <i class="fas fa-envelope"></i> Messages
+          </a>
+        </li>
+        <li>
+          <a
+            href="{{ url_for('admin.announcements_list') }}"
+            class="{% if request.endpoint == 'admin.announcements_list' %}active{% endif %}"
+          >
+            <i class="fas fa-bullhorn"></i> Announcements
+          </a>
+        </li>
+        <li>
+          <a
+            href="{{ url_for('admin.user_security') }}"
+            class="{% if request.endpoint in ['admin.user_security', 'admin.user_login_history'] %}active{% endif %}"
+          >
+            <i class="fas fa-shield-alt"></i> User Security
+          </a>
+        </li>
+        <li>
+          <a
+            href="{{ url_for('admin.settings') }}"
+            class="{% if request.endpoint == 'admin.settings' %}active{% endif %}"
+          >
+            <i class="fas fa-cog"></i> Settings
+          </a>
+        </li>
+        <li>
+          <a
+            href="{{ url_for('admin.profile') }}"
+            class="{% if request.endpoint == 'admin.profile' %}active{% endif %}"
+          >
+            <i class="fas fa-user-circle"></i> Admin Profile
+          </a>
+        </li>
+        <li>
+          <a
+            href="{{ url_for('admin.admin_logout') }}"
+            onclick="
+              event.preventDefault();
+              document.getElementById('logoutForm').submit();
+            "
+          >
+            <i class="fas fa-sign-out-alt"></i> Logout
+          </a>
+        </li>
+      </ul>
+    </aside>
+    {% endif %}
+
+    <form
+      id="logoutForm"
+      action="{{ url_for('admin.admin_logout') }}"
+      method="POST"
+      style="display: none"
+    >
+                {{ csrf_input() }}</form>
+
+    <div class="main-content" {% if not admin is defined %}style="margin-left:0;"{% endif %}>
+      {% if admin is defined %}
+      <header class="top-header">
+        <div class="d-flex align-items-center gap-2">
+          <h5 class="mb-0 fw-semibold">
+            {% block page_title %}Dashboard{% endblock %}
+          </h5>
+        </div>
+        <div class="header-actions">
+          <button
+            class="dark-mode-toggle"
+            id="darkModeToggle"
+            title="Toggle dark mode"
+          >
+            <i class="fas fa-moon" id="darkModeIcon"></i>
+          </button>
+          {% if admin %}
+          <div class="header-user">
+            <i class="fas fa-user-shield"></i>
+            <span class="d-none d-sm-inline">{{ admin.name }}</span>
+          </div>
+          {% endif %}
+        </div>
+      </header>
+      {% endif %}
+      {% block auth_header %}{% endblock %}
+
+      <main class="page-content">{% block content %}{% endblock %}</main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        const toggleBtn = document.getElementById("sidebarToggle");
+        const sidebar = document.getElementById("sidebar");
+        const overlay = document.getElementById("sidebarOverlay");
+        const darkToggle = document.getElementById("darkModeToggle");
+        const darkIcon = document.getElementById("darkModeIcon");
+        const body = document.body;
+
+        if (toggleBtn && sidebar && overlay) {
+          toggleBtn.addEventListener("click", function () {
+            sidebar.classList.toggle("show");
+            overlay.classList.toggle("show");
+          });
+          overlay.addEventListener("click", function () {
+            sidebar.classList.remove("show");
+            overlay.classList.remove("show");
+          });
+        }
+
+        const stored = localStorage.getItem("darkMode");
+        if (stored === "true") {
+          body.classList.add("dark-mode");
+          darkIcon.className = "fas fa-sun";
+          document.documentElement.setAttribute("data-bs-theme", "dark");
+        }
+        darkToggle.addEventListener("click", function () {
+          body.classList.toggle("dark-mode");
+          const isDark = body.classList.contains("dark-mode");
+          localStorage.setItem("darkMode", isDark);
+          darkIcon.className = isDark ? "fas fa-sun" : "fas fa-moon";
+          document.documentElement.setAttribute(
+            "data-bs-theme",
+            isDark ? "dark" : "light",
+          );
+        });
+
+        setTimeout(function () {
+          document
+            .querySelectorAll(".flash-container .alert")
+            .forEach(function (el) {
+              new bootstrap.Alert(el);
+              setTimeout(function () {
+                var alert = bootstrap.Alert.getOrCreateInstance(el);
+                if (alert) {
+                  alert.close();
+                }
+              }, 5000);
+            });
+        }, 100);
+      });
+    </script>
+    {% block extra_js %}{% endblock %}
+  </body>
+</html>

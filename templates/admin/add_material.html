@@ -1,0 +1,228 @@
+{% extends "admin/base.html" %} {% block title %}Upload Material - Admin{%
+endblock %} {% block page_title %}Upload Material{% endblock %} {% block
+extra_js %}
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const fileInput = document.getElementById("file");
+    const folderInput = document.getElementById("folder");
+    const toggleBtn = document.getElementById("toggleFolderBtn");
+    const fileName = document.getElementById("fileName");
+    const fileSize = document.getElementById("fileSize");
+    const uploadProgress = document.getElementById("uploadProgress");
+    const progressBar = document.getElementById("progressBar");
+
+    if (toggleBtn && fileInput && folderInput) {
+      toggleBtn.addEventListener("click", function () {
+        const isFolder = fileInput.style.display === "none";
+        if (isFolder) {
+          fileInput.style.display = "block";
+          folderInput.style.display = "none";
+          toggleBtn.innerHTML = '<i class="fas fa-folder me-1"></i>Upload Folder Instead';
+          fileInput.required = true;
+          folderInput.required = false;
+        } else {
+          fileInput.style.display = "none";
+          folderInput.style.display = "block";
+          toggleBtn.innerHTML = '<i class="fas fa-file me-1"></i>Upload File Instead';
+          fileInput.required = false;
+          folderInput.required = true;
+          folderInput.click();
+        }
+        fileName.textContent = "";
+        fileSize.textContent = "";
+        uploadProgress.style.display = "none";
+        progressBar.style.width = "0%";
+      });
+    }
+
+    function updateFileInfo(file) {
+      fileName.textContent = file.name;
+      fileSize.textContent = (file.size / 1024 / 1024).toFixed(2) + " MB";
+      uploadProgress.style.display = "block";
+      let width = 0;
+      const interval = setInterval(function () {
+        if (width >= 100) {
+          clearInterval(interval);
+          return;
+        }
+        width += Math.random() * 30;
+        if (width > 100) width = 100;
+        progressBar.style.width = width + "%";
+      }, 200);
+    }
+
+    if (fileInput) {
+      fileInput.addEventListener("change", function () {
+        if (this.files && this.files[0]) {
+          updateFileInfo(this.files[0]);
+        }
+      });
+    }
+
+    if (folderInput) {
+      folderInput.addEventListener("change", function () {
+        if (this.files && this.files.length > 0) {
+          const totalSize = Array.from(this.files).reduce((sum, f) => sum + f.size, 0);
+          fileName.textContent = this.files.length + " files selected";
+          fileSize.textContent = (totalSize / 1024 / 1024).toFixed(2) + " MB total";
+          uploadProgress.style.display = "block";
+          let width = 0;
+          const interval = setInterval(function () {
+            if (width >= 100) {
+              clearInterval(interval);
+              return;
+            }
+            width += Math.random() * 30;
+            if (width > 100) width = 100;
+            progressBar.style.width = width + "%";
+          }, 200);
+        }
+      });
+    }
+  });
+</script>
+{% endblock %} {% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-8">
+    <div class="card">
+      <div class="card-body">
+        <form
+          method="POST"
+          action="{{ url_for('admin.add_material') }}"
+          enctype="multipart/form-data"
+          novalidate
+        >
+                {{ csrf_input() }}
+          <div class="mb-3">
+            <label for="title" class="form-label"
+              >Title <span class="text-danger">*</span></label
+            >
+            <input
+              type="text"
+              class="form-control"
+              id="title"
+              name="title"
+              required
+              autofocus
+            />
+          </div>
+          <div class="mb-3">
+            <label for="description" class="form-label">Description</label>
+            <textarea
+              class="form-control"
+              id="description"
+              name="description"
+              rows="3"
+            ></textarea>
+          </div>
+          <div class="mb-3">
+            <label for="subject_id" class="form-label"
+              >Subject <span class="text-danger">*</span></label
+            >
+            <select
+              class="form-select"
+              id="subject_id"
+              name="subject_id"
+              required
+            >
+              <option value="">Select Subject</option>
+              {% for s in all_subjects %}
+              <option value="{{ s.id }}">{{ s.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="mb-3">
+            <label for="category_id" class="form-label"
+              >Category <span class="text-danger">*</span></label
+            >
+            <select
+              class="form-select"
+              id="category_id"
+              name="category_id"
+              required
+            >
+              <option value="">Select Category</option>
+              {% for c in all_categories %}
+              <option value="{{ c.id }}">{{ c.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label"
+              >Upload File <span class="text-danger">*</span></label
+            >
+            <div class="d-flex gap-2 mb-2">
+              <input
+                type="file"
+                class="form-control"
+                id="file"
+                name="file"
+                required
+              />
+              <input
+                type="file"
+                class="form-control"
+                id="folder"
+                name="folder"
+                webkitdirectory
+                directory
+                style="display: none"
+              />
+            </div>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="toggleFolderBtn">
+              <i class="fas fa-folder me-1"></i>Upload Folder Instead
+            </button>
+            <div id="fileName" class="mt-2 fw-semibold"></div>
+            <div id="fileSize" class="small text-muted"></div>
+            <div id="uploadProgress" class="mt-2" style="display: none">
+              <div class="progress-bar-custom">
+                <div
+                  class="progress-fill bg-primary"
+                  id="progressBar"
+                  style="width: 0%"
+                ></div>
+              </div>
+            </div>
+            <div class="form-text">
+              <strong>Allowed file types:</strong> PDF, DOC, DOCX, PPT, PPTX,
+              ZIP, TXT, Video files (MP4, WEBM, etc.)
+            </div>
+            <div class="form-text text-warning mt-1">
+              <i class="fas fa-info-circle me-1"></i>Folder upload: each valid file will be saved as a separate material entry.
+            </div>
+          </div>
+          <div class="mb-3 form-check form-switch">
+            <input
+              class="form-check-input"
+              type="checkbox"
+              id="is_featured"
+              name="is_featured"
+              value="1"
+            />
+            <label class="form-check-label" for="is_featured"
+              >Featured Material</label
+            >
+          </div>
+          <div class="mb-3">
+            <label for="is_active" class="form-label">Status</label>
+            <select class="form-select" id="is_active" name="is_active">
+              <option value="1" selected>Active</option>
+              <option value="0">Inactive</option>
+            </select>
+          </div>
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary">
+              <i class="fas fa-upload me-2"></i>Upload Material
+            </button>
+            <a
+              href="{{ url_for('admin.materials_list') }}"
+              class="btn btn-outline-secondary"
+              >Cancel</a
+            >
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

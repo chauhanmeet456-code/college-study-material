@@ -1,0 +1,68 @@
+{% extends "admin/base.html" %} {% block title %}Admin Audit Log - Admin{%
+endblock %} {% block page_title %}Audit Log{% endblock %} {% block content %}
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4">
+  <div>
+    <h4 class="fw-bold mb-0">Administrative Audit Log</h4>
+    <p class="text-muted mb-0">
+      Every administrative security action, newest first.
+    </p>
+  </div>
+  <a href="{{ url_for('admin.user_security') }}" class="btn btn-outline-secondary btn-sm">
+    <i class="fas fa-arrow-left me-1"></i>User security
+  </a>
+</div>
+
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span class="fw-semibold"><i class="fas fa-clipboard-list me-2"></i>Actions</span>
+    <span class="text-muted small">{{ total }} entry(ies)</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead>
+        <tr>
+          <th>When</th>
+          <th>Admin</th>
+          <th>Action</th>
+          <th class="d-none d-lg-table-cell">Target</th>
+          <th class="d-none d-lg-table-cell">IP</th>
+          <th>Details</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if logs %}
+        {% for l in logs %}
+        <tr>
+          <td class="text-nowrap small">{{ l.get('created_at')|default('unknown') }}</td>
+          <td class="small">
+            {{ l.get('admin_name') or ('#' ~ l.get('admin_id') if l.get('admin_id') else 'System') }}
+          </td>
+          <td>
+            <span class="badge bg-dark bg-opacity-10 text-body">
+              {{ l.get('action') or 'action' }}
+            </span>
+          </td>
+          <td class="d-none d-lg-table-cell small">
+            {{ (l.get('target_type')|default('-'))|title }}
+            {% if l.get('target_id') %}#{{ l.get('target_id') }}{% endif %}
+          </td>
+          <td class="d-none d-lg-table-cell small">{{ l.get('ip_address') or 'unknown' }}</td>
+          <td class="small">{{ l.get('details') or '' }}</td>
+        </tr>
+        {% endfor %}
+        {% else %}
+        <tr>
+          <td colspan="6" class="text-center text-muted py-5">
+            <i class="fas fa-clipboard-list fa-2x mb-2 d-block"></i>
+            No administrative security actions recorded yet.
+          </td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+  {% if total > 20 %}
+  <div class="card-footer text-muted small">Page {{ page }} &middot; {{ total }} entry(ies)</div>
+  {% endif %}
+</div>
+{% endblock %}

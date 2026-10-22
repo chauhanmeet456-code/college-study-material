@@ -1,0 +1,97 @@
+{% extends "admin/base.html" %} {% block title %}Message Detail - Admin{%
+endblock %} {% block page_title %}Message Detail{% endblock %} {% block content
+%}
+<div class="row justify-content-center">
+  <div class="col-lg-8">
+    <div class="card">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start mb-4">
+          <div>
+            <h4 class="fw-bold mb-1">{{ message.subject }}</h4>
+            <p class="text-muted mb-0">
+              From: {{ message.name }} ({{ message.email }})
+            </p>
+          </div>
+          <div class="d-flex gap-2">
+            <a
+              href="{{ url_for('admin.messages_list') }}"
+              class="btn btn-outline-secondary btn-sm"
+              >Back to Messages</a
+            >
+            <form
+              method="POST"
+              action="{{ url_for('admin.delete_message', message_id=message.id) }}"
+              onsubmit="return confirm('Are you sure?');"
+            >
+                {{ csrf_input() }}
+              <button type="submit" class="btn btn-outline-danger btn-sm">
+                Delete
+              </button>
+            </form>
+          </div>
+        </div>
+        <hr />
+        <div class="mb-3">
+          <label class="form-label small fw-semibold text-muted"
+            >Sender Name</label
+          >
+          <p class="mb-0">{{ message.name }}</p>
+        </div>
+        <div class="mb-3">
+          <label class="form-label small fw-semibold text-muted"
+            >Sender Email</label
+          >
+          <p class="mb-0">
+            <a href="mailto:{{ message.email }}">{{ message.email }}</a>
+          </p>
+        </div>
+        <div class="mb-3">
+          <label class="form-label small fw-semibold text-muted">Subject</label>
+          <p class="mb-0">{{ message.subject }}</p>
+        </div>
+        <div class="mb-3">
+          <label class="form-label small fw-semibold text-muted"
+            >Date Received</label
+          >
+          <p class="mb-0">{{ message.created_at|default('N/A') }}</p>
+        </div>
+        <div class="mb-3">
+          <label class="form-label small fw-semibold text-muted"
+            >Read Status</label
+          >
+          <p class="mb-0">
+            {% if message.is_read %}
+            <span class="badge bg-success bg-opacity-10 text-success"
+              >Read</span
+            >
+            {% else %}
+            <span class="badge bg-warning bg-opacity-10 text-warning"
+              >Unread</span
+            >
+            {% endif %}
+          </p>
+        </div>
+        <div class="mb-3">
+          <label class="form-label small fw-semibold text-muted">Message</label>
+          <div class="p-3 bg-body-custom rounded border">
+            {{ message.message|e|nl2br|safe }}
+          </div>
+        </div>
+        <div class="d-flex gap-2">
+          <a
+            href="mailto:{{ message.email }}?subject=Re: {{ message.subject }}"
+            class="btn btn-primary"
+          >
+            <i class="fas fa-reply me-2"></i>Reply via Email
+          </a>
+          <a
+            href="{{ url_for('admin.messages_list') }}"
+            class="btn btn-outline-secondary"
+            >Back to Messages</a
+          >
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

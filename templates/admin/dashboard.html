@@ -1,0 +1,240 @@
+{% extends "admin/base.html" %} {% block title %}Dashboard - Admin{% endblock %}
+{% block page_title %}Dashboard{% endblock %} {% block content %}
+<div
+  class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4"
+>
+  <div>
+    <h2 class="fw-bold mb-0">
+      Welcome back, {{ admin.name if admin else 'Admin' }}
+    </h2>
+    <p class="text-muted mb-0">
+      Here's what's happening with your platform today.
+    </p>
+  </div>
+  <a href="{{ url_for('admin.add_material') }}" class="btn btn-primary">
+    <i class="fas fa-plus me-2"></i>Upload Material
+  </a>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-4 col-xl-3">
+    <div class="stat-card">
+      <div class="d-flex align-items-center gap-3">
+        <div class="stat-icon bg-primary bg-opacity-10 text-primary">
+          <i class="fas fa-users"></i>
+        </div>
+        <div>
+          <div class="stat-number">{{ total_students }}</div>
+          <div class="stat-label">Total Students</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-4 col-xl-3">
+    <div class="stat-card">
+      <div class="d-flex align-items-center gap-3">
+        <div class="stat-icon bg-success bg-opacity-10 text-success">
+          <i class="fas fa-book"></i>
+        </div>
+        <div>
+          <div class="stat-number">{{ total_subjects }}</div>
+          <div class="stat-label">Total Subjects</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-4 col-xl-3">
+    <div class="stat-card">
+      <div class="d-flex align-items-center gap-3">
+        <div class="stat-icon bg-warning bg-opacity-10 text-warning">
+          <i class="fas fa-file-alt"></i>
+        </div>
+        <div>
+          <div class="stat-number">{{ total_materials }}</div>
+          <div class="stat-label">Total Materials</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-4 col-xl-3">
+    <div class="stat-card">
+      <div class="d-flex align-items-center gap-3">
+        <div class="stat-icon bg-info bg-opacity-10 text-info">
+          <i class="fas fa-sticky-note"></i>
+        </div>
+        <div>
+          <div class="stat-number">{{ total_notes }}</div>
+          <div class="stat-label">Total Notes</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-4 col-xl-3">
+    <div class="stat-card">
+      <div class="d-flex align-items-center gap-3">
+        <div class="stat-icon bg-danger bg-opacity-10 text-danger">
+          <i class="fas fa-tasks"></i>
+        </div>
+        <div>
+          <div class="stat-number">{{ total_assignments }}</div>
+          <div class="stat-label">Total Assignments</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-4 col-xl-3">
+    <div class="stat-card">
+      <div class="d-flex align-items-center gap-3">
+        <div class="stat-icon bg-secondary bg-opacity-10 text-secondary">
+          <i class="fas fa-book-open"></i>
+        </div>
+        <div>
+          <div class="stat-number">{{ total_books }}</div>
+          <div class="stat-label">Total Books</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-4 col-xl-3">
+    <div class="stat-card">
+      <div class="d-flex align-items-center gap-3">
+        <div class="stat-icon bg-success bg-opacity-10 text-success">
+          <i class="fas fa-flask"></i>
+        </div>
+        <div>
+          <div class="stat-number">{{ total_practicals }}</div>
+          <div class="stat-label">Total Practicals</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-4 col-xl-3">
+    <div class="stat-card">
+      <div class="d-flex align-items-center gap-3">
+        <div class="stat-icon bg-primary bg-opacity-10 text-primary">
+          <i class="fas fa-download"></i>
+        </div>
+        <div>
+          <div class="stat-number">{{ total_downloads }}</div>
+          <div class="stat-label">Total Downloads</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-4 col-xl-3">
+    <div class="stat-card">
+      <div class="d-flex align-items-center gap-3">
+        <div class="stat-icon bg-info bg-opacity-10 text-info">
+          <i class="fas fa-eye"></i>
+        </div>
+        <div>
+          <div class="stat-number">{{ total_views }}</div>
+          <div class="stat-label">Total Views</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-6">
+    <div class="card h-100">
+      <div class="card-header bg-transparent border-0 pt-3 px-3">
+        <h6 class="fw-semibold mb-0">Materials by Category</h6>
+      </div>
+      <div class="card-body">
+        {% set max_cat = [total_notes, total_assignments, total_books,
+        total_practicals] | max %} {% if max_cat > 0 %}
+        <div class="mb-3">
+          <div class="d-flex justify-content-between mb-1">
+            <span class="small">Notes</span>
+            <span class="small fw-semibold">{{ total_notes }}</span>
+          </div>
+          <div class="progress-bar-custom">
+            <div
+              class="progress-fill bg-primary"
+              style="width: {{ (total_notes / max_cat * 100) if max_cat else 0 }}%"
+            ></div>
+          </div>
+        </div>
+        <div class="mb-3">
+          <div class="d-flex justify-content-between mb-1">
+            <span class="small">Assignments</span>
+            <span class="small fw-semibold">{{ total_assignments }}</span>
+          </div>
+          <div class="progress-bar-custom">
+            <div
+              class="progress-fill bg-warning"
+              style="width: {{ (total_assignments / max_cat * 100) if max_cat else 0 }}%"
+            ></div>
+          </div>
+        </div>
+        <div class="mb-3">
+          <div class="d-flex justify-content-between mb-1">
+            <span class="small">Books</span>
+            <span class="small fw-semibold">{{ total_books }}</span>
+          </div>
+          <div class="progress-bar-custom">
+            <div
+              class="progress-fill bg-success"
+              style="width: {{ (total_books / max_cat * 100) if max_cat else 0 }}%"
+            ></div>
+          </div>
+        </div>
+        <div>
+          <div class="d-flex justify-content-between mb-1">
+            <span class="small">Practicals</span>
+            <span class="small fw-semibold">{{ total_practicals }}</span>
+          </div>
+          <div class="progress-bar-custom">
+            <div
+              class="progress-fill bg-danger"
+              style="width: {{ (total_practicals / max_cat * 100) if max_cat else 0 }}%"
+            ></div>
+          </div>
+        </div>
+        {% else %}
+        <p class="text-muted text-center mb-0">
+          No materials yet. Start by uploading some materials.
+        </p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card h-100">
+      <div class="card-header bg-transparent border-0 pt-3 px-3">
+        <h6 class="fw-semibold mb-0">Quick Actions</h6>
+      </div>
+      <div class="card-body">
+        <div class="d-grid gap-2">
+          <a
+            href="{{ url_for('admin.add_subject') }}"
+            class="btn btn-outline-primary text-start"
+          >
+            <i class="fas fa-plus-circle me-2"></i> Add New Subject
+          </a>
+          <a
+            href="{{ url_for('admin.add_material') }}"
+            class="btn btn-outline-primary text-start"
+          >
+            <i class="fas fa-upload me-2"></i> Upload New Material
+          </a>
+          <a
+            href="{{ url_for('admin.add_category') if url_for('admin.add_category') else '#' }}"
+            class="btn btn-outline-primary text-start"
+          >
+            <i class="fas fa-tag me-2"></i> Add New Category
+          </a>
+          <a
+            href="{{ url_for('admin.users_list') }}"
+            class="btn btn-outline-primary text-start"
+          >
+            <i class="fas fa-users me-2"></i> Manage Users
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

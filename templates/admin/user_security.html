@@ -1,0 +1,198 @@
+{% extends "admin/base.html" %} {% block title %}User Security - Admin{%
+endblock %} {% block page_title %}User Security{% endblock %} {% block content %}
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4">
+  <div>
+    <h4 class="fw-bold mb-0">Login History &amp; Sessions</h4>
+    <p class="text-muted mb-0">
+      Review sign-in activity and manage active student sessions.
+    </p>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <a href="{{ url_for('admin.failed_attempts') }}" class="btn btn-outline-danger btn-sm">
+      <i class="fas fa-ban me-1"></i>Failed Attempts
+    </a>
+    <a href="{{ url_for('admin.admin_audit_log') }}" class="btn btn-outline-secondary btn-sm">
+      <i class="fas fa-clipboard-list me-1"></i>Audit Log
+    </a>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <form method="GET" action="{{ url_for('admin.user_security') }}" class="row g-2 align-items-end">
+      <div class="col-sm-6 col-md-3">
+        <label class="form-label small fw-semibold text-muted">Search</label>
+        <input type="text" name="search" class="form-control" placeholder="Name, email or IP"
+               value="{{ search }}" />
+      </div>
+      <div class="col-sm-6 col-md-2">
+        <label class="form-label small fw-semibold text-muted">Event</label>
+        <select name="event_type" class="form-select">
+          <option value="">All</option>
+          <option value="login_success" {% if event_type == 'login_success' %}selected{% endif %}>Login success</option>
+          <option value="logout" {% if event_type == 'logout' %}selected{% endif %}>Logout</option>
+          <option value="login_failed" {% if event_type == 'login_failed' %}selected{% endif %}>Failed login</option>
+          <option value="session_revoked" {% if event_type == 'session_revoked' %}selected{% endif %}>Revoked</option>
+          <option value="session_replaced" {% if event_type == 'session_replaced' %}selected{% endif %}>Replaced</option>
+          <option value="session_expired" {% if event_type == 'session_expired' %}selected{% endif %}>Expired</option>
+          <option value="admin_revoked" {% if event_type == 'admin_revoked' %}selected{% endif %}>Admin ended</option>
+        </select>
+      </div>
+      <div class="col-sm-6 col-md-2">
+        <label class="form-label small fw-semibold text-muted">Result</label>
+        <select name="status" class="form-select">
+          <option value="">All</option>
+          <option value="success" {% if status == 'success' %}selected{% endif %}>Success</option>
+          <option value="failure" {% if status == 'failure' %}selected{% endif %}>Failure</option>
+          <option value="info" {% if status == 'info' %}selected{% endif %}>Info</option>
+        </select>
+      </div>
+      <div class="col-sm-6 col-md-2">
+        <label class="form-label small fw-semibold text-muted">From</label>
+        <input type="date" name="date_from" class="form-control" value="{{ date_from or '' }}" />
+      </div>
+      <div class="col-sm-6 col-md-2">
+        <label class="form-label small fw-semibold text-muted">To</label>
+        <input type="date" name="date_to" class="form-control" value="{{ date_to or '' }}" />
+      </div>
+      <div class="col-md-1">
+        <button type="submit" class="btn btn-primary w-100">
+          <i class="fas fa-search"></i>
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-xl-8">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span class="fw-semibold"><i class="fas fa-history me-2"></i>Login History</span>
+        <span class="text-muted small">{{ total }} event(s)</span>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-hover mb-0">
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>User</th>
+              <th>Event</th>
+              <th class="d-none d-lg-table-cell">Device</th>
+              <th class="d-none d-lg-table-cell">IP</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if history %}
+            {% for e in history %}
+            <tr>
+              <td class="text-nowrap small">{{ e.get('created_at')|default('unknown') }}</td>
+              <td class="small">
+                {% if e.get('user_id') %}
+                <a href="{{ url_for('admin.user_login_history', user_id=e.user_id) }}" class="fw-semibold">
+                  {{ e.get('user_name') or e.get('user_email') or e.user_id }}
+                </a>
+                {% else %}
+                <span class="text-muted">Unknown user</span>
+                {% endif %}
+              </td>
+              <td>
+                {% set ev = e.get('event_type') %}
+                {% if ev == 'login_success' %}
+                <span class="badge bg-success bg-opacity-10 text-success">Login</span>
+                {% elif ev == 'logout' %}
+                <span class="badge bg-secondary bg-opacity-10 text-secondary">Logout</span>
+                {% elif ev == 'login_failed' %}
+                <span class="badge bg-danger bg-opacity-10 text-danger">Failed</span>
+                {% elif ev == 'session_revoked' %}
+                <span class="badge bg-danger bg-opacity-10 text-danger">Revoked</span>
+                {% elif ev == 'session_replaced' %}
+                <span class="badge bg-warning bg-opacity-10 text-warning">Replaced</span>
+                {% elif ev == 'session_expired' %}
+                <span class="badge bg-info bg-opacity-10 text-info">Expired</span>
+                {% elif ev == 'admin_revoked' %}
+                <span class="badge bg-dark bg-opacity-10 text-body">Admin ended</span>
+                {% else %}
+                <span class="badge bg-secondary bg-opacity-10 text-secondary">{{ ev or 'Event' }}</span>
+                {% endif %}
+                {% if e.get('failure_reason') %}
+                <div class="small text-muted mt-1">{{ e.failure_reason }}</div>
+                {% endif %}
+              </td>
+              <td class="d-none d-lg-table-cell small">{{ e.get('device_description') or 'Unknown' }}</td>
+              <td class="d-none d-lg-table-cell small">{{ e.get('ip_address') or 'unknown' }}</td>
+            </tr>
+            {% endfor %}
+            {% else %}
+            <tr>
+              <td colspan="5" class="text-center text-muted py-5">
+                <i class="fas fa-shield-alt fa-2x mb-2 d-block"></i>
+                No login history recorded yet.
+              </td>
+            </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+      {% if total > 20 %}
+      <div class="card-footer text-muted small">Page {{ page }} &middot; {{ total }} event(s)</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="col-xl-4">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span class="fw-semibold"><i class="fas fa-laptop me-2"></i>Active Sessions</span>
+        <span class="text-muted small">{{ session_total }}</span>
+      </div>
+      {% if sessions %}
+      <div class="list-group list-group-flush">
+        {% for s in sessions %}
+        <div class="list-group-item d-flex justify-content-between align-items-start gap-2">
+          <div class="flex-grow-1">
+            <div class="fw-semibold small">
+              {{ s.get('device_name')|default('Unknown device') }}
+            </div>
+            <div class="text-muted" style="font-size: 0.78rem">
+              {% if s.get('user_id') %}
+              <a href="{{ url_for('admin.user_login_history', user_id=s.user_id) }}">
+                {{ s.get('name') or s.get('email') or ('User #' ~ s.user_id) }}
+              </a>
+              {% else %}
+              Unknown user
+              {% endif %}
+            </div>
+            <div class="text-muted" style="font-size: 0.78rem">
+              IP {{ s.get('ip_address') or 'unknown' }}
+            </div>
+            <div class="text-muted" style="font-size: 0.78rem">
+              Last active {{ s.get('last_activity_at')|default('unknown') }}
+            </div>
+          </div>
+          {% if s.get('user_id') %}
+          <form method="POST" action="{{ url_for('admin.revoke_user_session', user_id=s.user_id, session_id=s.id) }}"
+                onsubmit="return confirm('End this session? The user will be signed out on that device.');">
+                {{ csrf_input() }}
+            {{ csrf_input() }}
+            <button type="submit" class="btn btn-outline-danger btn-sm">
+              <i class="fas fa-power-off"></i>
+            </button>
+          </form>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="card-body text-center text-muted py-5">
+        <i class="fas fa-laptop fa-2x mb-2"></i>
+        <p class="mb-0 small">No active sessions right now.</p>
+      </div>
+      {% endif %}
+      {% if session_total > 20 %}
+      <div class="card-footer text-muted small">Page {{ session_page }} &middot; {{ session_total }} session(s)</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

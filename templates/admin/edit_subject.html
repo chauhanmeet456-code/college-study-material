@@ -1,0 +1,96 @@
+{% extends "admin/base.html" %} {% block title %}Edit Subject - Admin{% endblock
+%} {% block page_title %}Edit Subject{% endblock %} {% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-6">
+    <div class="card">
+      <div class="card-body">
+        <form
+          method="POST"
+          action="{{ url_for('admin.edit_subject', subject_id=subject.id) }}"
+          novalidate
+        >
+                {{ csrf_input() }}
+          <div class="mb-3">
+            <label for="name" class="form-label"
+              >Subject Name <span class="text-danger">*</span></label
+            >
+            <input
+              type="text"
+              class="form-control"
+              id="name"
+              name="name"
+              value="{{ subject.name }}"
+              required
+            />
+          </div>
+          <div class="mb-3">
+            <label for="code" class="form-label"
+              >Subject Code <span class="text-danger">*</span></label
+            >
+            <input
+              type="text"
+              class="form-control"
+              id="code"
+              name="code"
+              value="{{ subject.code }}"
+              required
+            />
+          </div>
+          <div class="mb-3">
+            <label for="description" class="form-label">Description</label>
+            <textarea
+              class="form-control"
+              id="description"
+              name="description"
+              rows="3"
+            >
+{{ subject.description }}</textarea
+            >
+          </div>
+          <div class="mb-3">
+            <label for="icon" class="form-label">Icon</label>
+            <select class="form-select" id="icon" name="icon">
+              {% set icons = [ ('fa-book', 'Book'), ('fa-laptop-code', 'Laptop
+              Code'), ('fa-calculator', 'Calculator'), ('fa-flask', 'Flask'),
+              ('fa-palette', 'Palette'), ('fa-chart-line', 'Chart'),
+              ('fa-graduation-cap', 'Graduation Cap'), ('fa-atom', 'Atom'),
+              ('fa-microscope', 'Microscope'), ('fa-code', 'Code'),
+              ('fa-pen-ruler', 'Pen Ruler'), ('fa-globe', 'Globe'), ('fa-brain',
+              'Brain'), ('fa-dna', 'DNA'), ('fa-cogs', 'Gears') ] %} {% for
+              icon_val, icon_label in icons %}
+              <option
+                value="{{ icon_val }}"
+                {% if subject.icon == icon_val %}selected{% endif %}
+              >
+                {{ icon_label }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="mb-3 form-check form-switch">
+            <input
+              class="form-check-input"
+              type="checkbox"
+              id="is_active"
+              name="is_active"
+              value="1"
+              {% if subject.is_active %}checked{% endif %}
+            />
+            <label class="form-check-label" for="is_active">Active</label>
+          </div>
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary">
+              <i class="fas fa-save me-2"></i>Update Subject
+            </button>
+            <a
+              href="{{ url_for('admin.subjects_list') }}"
+              class="btn btn-outline-secondary"
+              >Cancel</a
+            >
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

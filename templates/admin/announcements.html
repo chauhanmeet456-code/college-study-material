@@ -1,0 +1,248 @@
+{% extends "admin/base.html" %} {% block title %}Announcements - Admin{% endblock %} {% block page_title %}Announcements{% endblock %} {% block content %}
+<div
+  class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4"
+>
+  <div>
+    <h4 class="fw-bold mb-0">All Announcements</h4>
+    <p class="text-muted mb-0">Manage website announcements.</p>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <form
+      method="GET"
+      action="{{ url_for('admin.announcements_list') }}"
+      class="row g-2 align-items-end"
+    >
+      <div class="col-sm-6 col-md-4">
+        <label class="form-label small fw-semibold text-muted">Search</label>
+        <input
+          type="text"
+          name="search"
+          class="form-control"
+          placeholder="Search announcements..."
+          value="{{ search }}"
+        />
+      </div>
+      <div class="col-sm-4 col-md-3">
+        <label class="form-label small fw-semibold text-muted">Status</label>
+        <select name="status" class="form-select">
+          <option value="all" {% if status == 'all' %}selected{% endif %}>All</option>
+          <option value="active" {% if status == 'active' %}selected{% endif %}>Active</option>
+          <option value="inactive" {% if status == 'inactive' %}selected{% endif %}>Inactive</option>
+        </select>
+      </div>
+      <div class="col-sm-2 col-md-2">
+        <button type="submit" class="btn btn-primary w-100">
+          <i class="fas fa-search"></i>
+        </button>
+      </div>
+      <div class="col-sm-2 col-md-1">
+        <a
+          href="{{ url_for('admin.announcements_list') }}"
+          class="btn btn-outline-secondary w-100"
+          >Reset</a
+        >
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="row mb-4">
+  <div class="col-lg-4">
+    <div class="card">
+      <div class="card-body">
+        <h6 class="fw-semibold mb-3">Add New Announcement</h6>
+        <form
+          method="POST"
+          action="{{ url_for('admin.add_announcement') }}"
+          novalidate
+        >
+                {{ csrf_input() }}
+          <div class="mb-3">
+            <label for="ann_title" class="form-label"
+              >Title <span class="text-danger">*</span></label
+            >
+            <input
+              type="text"
+              class="form-control"
+              id="ann_title"
+              name="title"
+              required
+              autofocus
+            />
+          </div>
+          <div class="mb-3">
+            <label for="ann_desc" class="form-label">Description</label>
+            <textarea
+              class="form-control"
+              id="ann_desc"
+              name="description"
+              rows="2"
+            ></textarea>
+          </div>
+          <div class="mb-3 form-check form-switch">
+            <input
+              class="form-check-input"
+              type="checkbox"
+              id="ann_active"
+              name="is_active"
+              value="1"
+              checked
+            />
+            <label class="form-check-label" for="ann_active">Active</label>
+          </div>
+          <button type="submit" class="btn btn-primary w-100">
+            <i class="fas fa-plus me-2"></i>Add Announcement
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-8">
+    <div class="card h-100">
+      <div class="table-responsive">
+        <table class="table table-hover mb-0">
+          <thead>
+            <tr>
+              <th>Title</th>
+              <th class="d-none d-md-table-cell">Description</th>
+              <th>Date</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if announcements %} {% for ann in announcements %}
+            <tr>
+              <td class="fw-semibold">{{ ann.title }}</td>
+              <td class="d-none d-md-table-cell text-muted">
+                {{ ann.description|truncate(60) if ann.description else '-' }}
+              </td>
+              <td>{{ ann.created_at|default('N/A') }}</td>
+              <td>
+                {% if ann.is_active %}
+                <span class="badge bg-success bg-opacity-10 text-success"
+                  >Active</span
+                >
+                {% else %}
+                <span class="badge bg-danger bg-opacity-10 text-danger"
+                  >Inactive</span
+                >
+                {% endif %}
+              </td>
+              <td>
+                <div class="d-flex gap-1">
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-outline-primary"
+                    data-bs-toggle="modal"
+                    data-bs-target="#editAnnModal{{ ann.id }}"
+                    title="Edit"
+                  >
+                    <i class="fas fa-edit"></i>
+                  </button>
+                  <form
+                    method="POST"
+                    action="{{ url_for('admin.delete_announcement', announcement_id=ann.id) }}"
+                    onsubmit="return confirm('Are you sure?');"
+                  >
+                {{ csrf_input() }}
+                    <button
+                      type="submit"
+                      class="btn btn-sm btn-outline-danger"
+                      title="Delete"
+                    >
+                      <i class="fas fa-trash"></i>
+                    </button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+            {% endfor %} {% else %}
+            <tr>
+              <td colspan="5" class="text-center py-5 text-muted">
+                <i class="fas fa-inbox fa-2x mb-2 d-block"></i>
+                No announcements found.
+              </td>
+            </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if announcements %} {% for ann in announcements %}
+<div
+  class="modal fade"
+  id="editAnnModal{{ ann.id }}"
+  tabindex="-1"
+  aria-hidden="true"
+>
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Edit Announcement</h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+          aria-label="Close"
+        ></button>
+      </div>
+      <form
+        method="POST"
+        action="{{ url_for('admin.edit_announcement', announcement_id=ann.id) }}"
+      >
+                {{ csrf_input() }}
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label"
+              >Title <span class="text-danger">*</span></label
+            >
+            <input
+              type="text"
+              class="form-control"
+              name="title"
+              value="{{ ann.title }}"
+              required
+            />
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Description</label>
+            <textarea class="form-control" name="description" rows="2">
+{{ ann.description }}</textarea
+            >
+          </div>
+          <div class="mb-3 form-check form-switch">
+            <input
+              class="form-check-input"
+              type="checkbox"
+              id="ann_active_{{ ann.id }}"
+              name="is_active"
+              value="1"
+              {% if ann.is_active %}checked{% endif %}
+            />
+            <label class="form-check-label" for="ann_active_{{ ann.id }}"
+              >Active</label
+            >
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button
+            type="button"
+            class="btn btn-outline-secondary"
+            data-bs-dismiss="modal"
+          >
+            Close
+          </button>
+          <button type="submit" class="btn btn-primary">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endfor %} {% endif %} {% endblock %}

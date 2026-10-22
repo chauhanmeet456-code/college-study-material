@@ -1,0 +1,82 @@
+{% extends "admin/base.html" %} {% block title %}Add Subject - Admin{% endblock
+%} {% block page_title %}Add Subject{% endblock %} {% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-6">
+    <div class="card">
+      <div class="card-body">
+        <form
+          method="POST"
+          action="{{ url_for('admin.add_subject') }}"
+          novalidate
+        >
+                {{ csrf_input() }}
+          <div class="mb-3">
+            <label for="name" class="form-label"
+              >Subject Name <span class="text-danger">*</span></label
+            >
+            <input
+              type="text"
+              class="form-control"
+              id="name"
+              name="name"
+              required
+              autofocus
+            />
+          </div>
+          <div class="mb-3">
+            <label for="code" class="form-label"
+              >Subject Code <span class="text-danger">*</span></label
+            >
+            <input
+              type="text"
+              class="form-control"
+              id="code"
+              name="code"
+              required
+            />
+          </div>
+          <div class="mb-3">
+            <label for="description" class="form-label">Description</label>
+            <textarea
+              class="form-control"
+              id="description"
+              name="description"
+              rows="3"
+            ></textarea>
+          </div>
+          <div class="mb-3">
+            <label for="icon" class="form-label">Icon</label>
+            <select class="form-select" id="icon" name="icon">
+              <option value="fa-book">Book</option>
+              <option value="fa-laptop-code">Laptop Code</option>
+              <option value="fa-calculator">Calculator</option>
+              <option value="fa-flask">Flask</option>
+              <option value="fa-palette">Palette</option>
+              <option value="fa-chart-line">Chart</option>
+              <option value="fa-graduation-cap">Graduation Cap</option>
+              <option value="fa-atom">Atom</option>
+              <option value="fa-microscope">Microscope</option>
+              <option value="fa-code">Code</option>
+              <option value="fa-pen-ruler">Pen Ruler</option>
+              <option value="fa-globe">Globe</option>
+              <option value="fa-brain">Brain</option>
+              <option value="fa-dna">DNA</option>
+              <option value="fa-cogs">Gears</option>
+            </select>
+          </div>
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary">
+              <i class="fas fa-plus me-2"></i>Add Subject
+            </button>
+            <a
+              href="{{ url_for('admin.subjects_list') }}"
+              class="btn btn-outline-secondary"
+              >Cancel</a
+            >
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

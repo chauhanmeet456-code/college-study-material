@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}About Us - StudyHub{% endblock %}
+{% block content %}
+<div class="container py-5 fade-in">
+    <div class="text-center mb-5">
+        <div class="category-icon bg-primary bg-opacity-10 text-primary-custom mx-auto mb-3" style="width:80px;height:80px;font-size:2rem;"><i class="fas fa-graduation-cap"></i></div>
+        <h1 class="fw-bold mb-2">About StudyHub</h1>
+        <p class="text-muted" style="max-width:600px;margin:0 auto;">Empowering students with easy access to quality study materials for their academic success.</p>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-body p-4">
+            <h3 class="fw-bold mb-3"><i class="fas fa-bullseye text-primary me-2"></i>Our Mission</h3>
+            <p class="text-secondary mb-0">StudyHub was created with a simple mission: to make quality education accessible to every student. We believe that access to the right study materials can make a significant difference in a student's academic performance. Our platform brings together notes, assignments, books, practicals, question papers, and more in one centralized location, making it easier for students to find and utilize the resources they need.</p>
+        </div>
+    </div>
+
+    <h2 class="fw-bold mb-4">What Makes Us Different</h2>
+    <div class="row g-4 mb-5">
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <div class="category-icon bg-primary bg-opacity-10 text-primary-custom mx-auto mb-3"><i class="fas fa-bolt"></i></div>
+                    <h5 class="fw-semibold">Quick Access</h5>
+                    <p class="text-muted small mb-0">Find materials instantly with our powerful search and organized categories.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <div class="category-icon bg-success bg-opacity-10 text-success mx-auto mb-3"><i class="fas fa-lock"></i></div>
+                    <h5 class="fw-semibold">Secure & Reliable</h5>
+                    <p class="text-muted small mb-0">Your data is protected. All materials are verified and safe to download.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <div class="category-icon bg-info bg-opacity-10 text-info mx-auto mb-3"><i class="fas fa-mobile-alt"></i></div>
+                    <h5 class="fw-semibold">Mobile Friendly</h5>
+                    <p class="text-muted small mb-0">Access materials on any device with our fully responsive design.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <div class="category-icon bg-warning bg-opacity-10 text-warning mx-auto mb-3"><i class="fas fa-sync-alt"></i></div>
+                    <h5 class="fw-semibold">Regular Updates</h5>
+                    <p class="text-muted small mb-0">New materials added regularly to keep you up to date with your syllabus.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <div class="category-icon bg-danger bg-opacity-10 text-danger mx-auto mb-3"><i class="fas fa-heart"></i></div>
+                    <h5 class="fw-semibold">Favorites</h5>
+                    <p class="text-muted small mb-0">Save materials to your favorites for quick access later.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <div class="category-icon bg-purple bg-opacity-10 text-purple mx-auto mb-3"><i class="fas fa-users"></i></div>
+                    <h5 class="fw-semibold">Community</h5>
+                    <p class="text-muted small mb-0">Join a community of learners sharing knowledge and resources.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card bg-primary text-white">
+        <div class="card-body text-center p-4">
+            <h3 class="fw-bold mb-2">Ready to Get Started?</h3>
+            <p class="mb-3 opacity-90">Join thousands of students already using StudyHub to ace their exams.</p>
+            <a href="{{ url_for('main.subjects') }}" class="btn btn-light fw-semibold">Browse Subjects</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

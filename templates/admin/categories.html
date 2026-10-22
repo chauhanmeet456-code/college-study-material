@@ -1,0 +1,170 @@
+{% extends "admin/base.html" %} {% block title %}Categories - Admin{% endblock
+%} {% block page_title %}Categories{% endblock %} {% block content %}
+<div
+  class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4"
+>
+  <div>
+    <h4 class="fw-bold mb-0">All Categories</h4>
+    <p class="text-muted mb-0">Manage material categories.</p>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-lg-4">
+    <div class="card">
+      <div class="card-body">
+        <h6 class="fw-semibold mb-3">Add New Category</h6>
+        <form
+          method="POST"
+          action="{{ url_for('admin.add_category') }}"
+          novalidate
+        >
+                {{ csrf_input() }}
+          <div class="mb-3">
+            <label for="cat_name" class="form-label"
+              >Name <span class="text-danger">*</span></label
+            >
+            <input
+              type="text"
+              class="form-control"
+              id="cat_name"
+              name="name"
+              required
+              autofocus
+            />
+          </div>
+          <div class="mb-3">
+            <label for="cat_desc" class="form-label">Description</label>
+            <textarea
+              class="form-control"
+              id="cat_desc"
+              name="description"
+              rows="2"
+            ></textarea>
+          </div>
+          <button type="submit" class="btn btn-primary w-100">
+            <i class="fas fa-plus me-2"></i>Add Category
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-8">
+    <div class="card h-100">
+      <div class="table-responsive">
+        <table class="table table-hover mb-0">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Description</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if categories %} {% for cat in categories %}
+            <tr>
+              <td class="fw-semibold">{{ cat.name }}</td>
+              <td class="text-muted">
+                {{ cat.description|truncate(80) if cat.description else '-' }}
+              </td>
+              <td>
+                <div class="d-flex gap-1">
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-outline-primary"
+                    data-bs-toggle="modal"
+                    data-bs-target="#editModal{{ cat.id }}"
+                    title="Edit"
+                  >
+                    <i class="fas fa-edit"></i>
+                  </button>
+                  <form
+                    method="POST"
+                    action="{{ url_for('admin.delete_category', category_id=cat.id) }}"
+                    onsubmit="return confirm('Are you sure?');"
+                  >
+                {{ csrf_input() }}
+                    <button
+                      type="submit"
+                      class="btn btn-sm btn-outline-danger"
+                      title="Delete"
+                    >
+                      <i class="fas fa-trash"></i>
+                    </button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+            {% endfor %} {% else %}
+            <tr>
+              <td colspan="3" class="text-center py-5 text-muted">
+                <i class="fas fa-inbox fa-2x mb-2 d-block"></i>
+                No categories found.
+              </td>
+            </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if categories %} {% for cat in categories %}
+<div
+  class="modal fade"
+  id="editModal{{ cat.id }}"
+  tabindex="-1"
+  aria-hidden="true"
+>
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Edit Category</h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+          aria-label="Close"
+        ></button>
+      </div>
+      <form
+        method="POST"
+        action="{{ url_for('admin.edit_category', category_id=cat.id) }}"
+      >
+                {{ csrf_input() }}
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label"
+              >Name <span class="text-danger">*</span></label
+            >
+            <input
+              type="text"
+              class="form-control"
+              name="name"
+              value="{{ cat.name }}"
+              required
+            />
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Description</label>
+            <textarea class="form-control" name="description" rows="2">
+{{ cat.description }}</textarea
+            >
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button
+            type="button"
+            class="btn btn-outline-secondary"
+            data-bs-dismiss="modal"
+          >
+            Close
+          </button>
+          <button type="submit" class="btn btn-primary">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endfor %} {% endif %} {% endblock %}

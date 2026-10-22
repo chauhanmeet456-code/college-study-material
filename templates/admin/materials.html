@@ -1,0 +1,310 @@
+{% extends "admin/base.html" %} {% block title %}Materials - Admin{% endblock %}
+{% block page_title %}Materials{% endblock %} {% block content %}
+<div
+  class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4"
+>
+  <div>
+    <h4 class="fw-bold mb-0">All Materials</h4>
+    <p class="text-muted mb-0">Manage uploaded study materials.</p>
+  </div>
+  <a href="{{ url_for('admin.add_material') }}" class="btn btn-primary">
+    <i class="fas fa-upload me-2"></i>Upload Material
+  </a>
+</div>
+
+<div class="card mb-3">
+      <div class="card-body">
+        <form
+          method="GET"
+          action="{{ url_for('admin.materials_list') }}"
+          class="row g-2 align-items-end"
+        >
+          <div class="col-sm-6 col-md-4">
+            <label class="form-label small fw-semibold text-muted">Search</label>
+            <input
+              type="text"
+              name="search"
+              class="form-control"
+              placeholder="Search materials..."
+              value="{{ search }}"
+            />
+          </div>
+          <div class="col-sm-6 col-md-3">
+            <label class="form-label small fw-semibold text-muted">Subject</label>
+            <select name="subject_id" class="form-select">
+              <option value="">All Subjects</option>
+              {% for s in all_subjects %}
+              <option value="{{ s.id }}" {% if subject_id == s.id|string %}selected{% endif %}>
+                {{ s.name }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-sm-6 col-md-3">
+            <label class="form-label small fw-semibold text-muted">Category</label>
+            <select name="category_id" class="form-select">
+              <option value="">All Categories</option>
+              {% for c in all_categories %}
+              <option value="{{ c.id }}" {% if category_id == c.id|string %}selected{% endif %}>
+                {{ c.name }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-sm-6 col-md-2">
+            <label class="form-label small fw-semibold text-muted">Status</label>
+            <select name="status" class="form-select">
+              <option value="all" {% if status == 'all' %}selected{% endif %}>All</option>
+              <option value="active" {% if status == 'active' %}selected{% endif %}>Active</option>
+              <option value="inactive" {% if status == 'inactive' %}selected{% endif %}>Inactive</option>
+            </select>
+          </div>
+          <div class="col-sm-6 col-md-2">
+            <label class="form-label small fw-semibold text-muted">Featured</label>
+            <select name="featured" class="form-select">
+              <option value="">All</option>
+              <option value="1" {% if featured == '1' %}selected{% endif %}>Featured</option>
+              <option value="0" {% if featured == '0' %}selected{% endif %}>Not Featured</option>
+            </select>
+          </div>
+      <div class="col-auto">
+        <button type="submit" class="btn btn-primary">
+          <i class="fas fa-search"></i>
+        </button>
+      </div>
+      <div class="col-auto">
+        <a
+          href="{{ url_for('admin.materials_list') }}"
+          class="btn btn-outline-secondary"
+          >Reset</a
+        >
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Title</th>
+          <th>Subject</th>
+          <th class="d-none d-lg-table-cell">Category</th>
+          <th class="d-none d-md-table-cell">File Type</th>
+          <th class="d-none d-lg-table-cell">Size</th>
+          <th class="d-none d-lg-table-cell">Views</th>
+          <th class="d-none d-lg-table-cell">Downloads</th>
+          <th>Featured</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if materials %} {% for material in materials %}
+        <tr>
+          <td>
+            <span class="fw-semibold">{{ material.title }}</span>
+            {% if material.description %}
+            <br /><small class="text-muted"
+              >{{ material.description|truncate(50) }}</small
+            >
+            {% endif %}
+          </td>
+          <td>{{ material.subject_name }}</td>
+          <td class="d-none d-lg-table-cell">{{ material.category_name }}</td>
+          <td class="d-none d-md-table-cell">
+            <span class="badge bg-light text-dark"
+              >{{ material.file_type|upper }}</span
+            >
+          </td>
+          <td class="d-none d-lg-table-cell">
+            {{ material.file_size|default(0)|filesizeformat }}
+          </td>
+          <td class="d-none d-lg-table-cell">
+            {{ material.view_count|default(0) }}
+          </td>
+          <td class="d-none d-lg-table-cell">
+            {{ material.download_count|default(0) }}
+          </td>
+          <td>
+            {% if material.is_featured %}
+            <span class="badge bg-warning bg-opacity-10 text-warning"
+              ><i class="fas fa-star me-1"></i>Yes</span
+            >
+            {% else %}
+            <span class="badge bg-light text-dark">No</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if material.is_active %}
+            <span class="badge bg-success bg-opacity-10 text-success"
+              >Active</span
+            >
+            {% else %}
+            <span class="badge bg-danger bg-opacity-10 text-danger"
+              >Inactive</span
+            >
+            {% endif %}
+          </td>
+          <td>
+            <div class="d-flex gap-1 flex-wrap">
+              <a
+                href="{{ url_for('main.material_details', material_id=material.id) }}"
+                class="btn btn-sm btn-outline-info"
+                title="View"
+                target="_blank"
+              >
+                <i class="fas fa-eye"></i>
+              </a>
+              <a
+                href="{{ url_for('admin.edit_material', material_id=material.id) }}"
+                class="btn btn-sm btn-outline-primary"
+                title="Edit"
+              >
+                <i class="fas fa-edit"></i>
+              </a>
+              <form
+                method="POST"
+                action="{{ url_for('admin.edit_material', material_id=material.id) }}"
+                class="d-inline"
+              >
+                {{ csrf_input() }}
+                <input
+                  type="hidden"
+                  name="is_featured"
+                  value="{{ 0 if material.is_featured else 1 }}"
+                />
+                <input
+                  type="hidden"
+                  name="title"
+                  value="{{ material.title }}"
+                />
+                <input
+                  type="hidden"
+                  name="description"
+                  value="{{ material.description }}"
+                />
+                <input
+                  type="hidden"
+                  name="subject_id"
+                  value="{{ material.subject_id }}"
+                />
+                <input
+                  type="hidden"
+                  name="category_id"
+                  value="{{ material.category_id }}"
+                />
+                <input
+                  type="hidden"
+                  name="is_active"
+                  value="{{ 1 if material.is_active else 0 }}"
+                />
+                <button
+                  type="submit"
+                  class="btn btn-sm btn-outline-{{ 'warning' if material.is_featured else 'warning' }}"
+                  title="{{ 'Unfeature' if material.is_featured else 'Feature' }}"
+                >
+                  <i class="fas fa-star"></i>
+                </button>
+              </form>
+              <form
+                method="POST"
+                action="{{ url_for('admin.edit_material', material_id=material.id) }}"
+                class="d-inline"
+              >
+                {{ csrf_input() }}
+                <input
+                  type="hidden"
+                  name="is_featured"
+                  value="{{ material.is_featured }}"
+                />
+                <input
+                  type="hidden"
+                  name="title"
+                  value="{{ material.title }}"
+                />
+                <input
+                  type="hidden"
+                  name="description"
+                  value="{{ material.description }}"
+                />
+                <input
+                  type="hidden"
+                  name="subject_id"
+                  value="{{ material.subject_id }}"
+                />
+                <input
+                  type="hidden"
+                  name="category_id"
+                  value="{{ material.category_id }}"
+                />
+                <input
+                  type="hidden"
+                  name="is_active"
+                  value="{{ 0 if material.is_active else 1 }}"
+                />
+                <button
+                  type="submit"
+                  class="btn btn-sm btn-outline-{{ 'danger' if material.is_active else 'success' }}"
+                  title="{{ 'Deactivate' if material.is_active else 'Activate' }}"
+                >
+                  <i
+                    class="fas fa-{{ 'ban' if material.is_active else 'check' }}"
+                  ></i>
+                </button>
+              </form>
+              <form
+                method="POST"
+                action="{{ url_for('admin.delete_material', material_id=material.id) }}"
+                onsubmit="return confirm('Are you sure?');"
+              >
+                {{ csrf_input() }}
+                <button
+                  type="submit"
+                  class="btn btn-sm btn-outline-danger"
+                  title="Delete"
+                >
+                  <i class="fas fa-trash"></i>
+                </button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %} {% else %}
+        <tr>
+          <td colspan="10" class="text-center py-5 text-muted">
+            <i class="fas fa-inbox fa-2x mb-2 d-block"></i>
+            No materials found.
+          </td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+  {% if total > 10 %}
+  <div
+    class="card-footer bg-transparent border-0 d-flex justify-content-between align-items-center flex-wrap gap-2"
+  >
+    <span class="text-muted small"
+      >Showing {{ ((page - 1) * 10) + 1 }} to {{ page * 10 if page * 10 < total else total }} of {{
+      total }}</span
+    >
+    <nav>
+      <ul class="pagination pagination-sm mb-0">
+        {% set total_pages = (total / 10) | int + (1 if total % 10 else 0) %} {%
+        for p in range(1, total_pages + 1) %}
+        <li class="page-item {% if p == page %}active{% endif %}">
+          <a
+            class="page-link"
+            href="?page={{ p }}&search={{ search }}&subject_id={{ subject_id }}&category_id={{ category_id }}&featured={{ featured }}&status={{ status }}"
+            >{{ p }}</a
+          >
+        </li>
+        {% endfor %}
+      </ul>
+    </nav>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

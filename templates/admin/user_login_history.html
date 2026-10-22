@@ -1,0 +1,178 @@
+{% extends "admin/base.html" %} {% block title %}{{ user.name }} - Login
+History{% endblock %} {% block page_title %}Login History{% endblock %} {%
+block content %}
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4">
+  <div>
+    <h4 class="fw-bold mb-0">{{ user.name }}</h4>
+    <p class="text-muted mb-0">
+      {{ user.email }} &middot; User ID {{ user.id }}
+    </p>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="{{ url_for('admin.view_user', user_id=user.id) }}" class="btn btn-outline-secondary btn-sm">
+      <i class="fas fa-arrow-left me-1"></i>User details
+    </a>
+    <a href="{{ url_for('admin.user_security') }}" class="btn btn-outline-primary btn-sm">
+      <i class="fas fa-shield-alt me-1"></i>All users
+    </a>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="{% if active_sessions %}col-lg-7{% else %}col-12{% endif %}">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span class="fw-semibold"><i class="fas fa-history me-2"></i>Events</span>
+        <span class="text-muted small">{{ total }} event(s)</span>
+      </div>
+      <div class="card-body">
+        <form method="GET" class="row g-2 align-items-end">
+          <div class="col-sm-5">
+            <label class="form-label small fw-semibold text-muted">Event type</label>
+            <select name="event_type" class="form-select">
+              <option value="">All events</option>
+              <option value="login_success" {% if event_type == 'login_success' %}selected{% endif %}>Login success</option>
+              <option value="logout" {% if event_type == 'logout' %}selected{% endif %}>Logout</option>
+              <option value="login_failed" {% if event_type == 'login_failed' %}selected{% endif %}>Failed login</option>
+              <option value="session_revoked" {% if event_type == 'session_revoked' %}selected{% endif %}>Revoked</option>
+              <option value="session_replaced" {% if event_type == 'session_replaced' %}selected{% endif %}>Replaced</option>
+              <option value="session_expired" {% if event_type == 'session_expired' %}selected{% endif %}>Expired</option>
+              <option value="admin_revoked" {% if event_type == 'admin_revoked' %}selected{% endif %}>Admin ended</option>
+            </select>
+          </div>
+          <div class="col-sm-3">
+            <label class="form-label small fw-semibold text-muted">From</label>
+            <input type="date" name="date_from" class="form-control" value="{{ date_from or '' }}" />
+          </div>
+          <div class="col-sm-3">
+            <label class="form-label small fw-semibold text-muted">To</label>
+            <input type="date" name="date_to" class="form-control" value="{{ date_to or '' }}" />
+          </div>
+          <div class="col-sm-1">
+            <button type="submit" class="btn btn-primary w-100">
+              <i class="fas fa-search"></i>
+            </button>
+          </div>
+        </form>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-hover mb-0">
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>Event</th>
+              <th class="d-none d-lg-table-cell">Device</th>
+              <th class="d-none d-lg-table-cell">IP</th>
+              <th class="d-none d-lg-table-cell">Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if history %}
+            {% for e in history %}
+            <tr>
+              <td class="text-nowrap small">{{ e.get('created_at')|default('unknown') }}</td>
+              <td>
+                {% set ev = e.get('event_type') %}
+                {% if ev == 'login_success' %}
+                <span class="badge bg-success bg-opacity-10 text-success">Login</span>
+                {% elif ev == 'logout' %}
+                <span class="badge bg-secondary bg-opacity-10 text-secondary">Logout</span>
+                {% elif ev == 'login_failed' %}
+                <span class="badge bg-danger bg-opacity-10 text-danger">Failed</span>
+                {% elif ev == 'session_revoked' %}
+                <span class="badge bg-danger bg-opacity-10 text-danger">Revoked</span>
+                {% elif ev == 'session_replaced' %}
+                <span class="badge bg-warning bg-opacity-10 text-warning">Replaced</span>
+                {% elif ev == 'session_expired' %}
+                <span class="badge bg-info bg-opacity-10 text-info">Expired</span>
+                {% elif ev == 'admin_revoked' %}
+                <span class="badge bg-dark bg-opacity-10 text-body">Admin ended</span>
+                {% else %}
+                <span class="badge bg-secondary bg-opacity-10 text-secondary">{{ ev or 'Event' }}</span>
+                {% endif %}
+                {% if e.get('failure_reason') %}
+                <div class="small text-muted mt-1">{{ e.failure_reason }}</div>
+                {% endif %}
+              </td>
+              <td class="d-none d-lg-table-cell small">{{ e.get('device_description') or 'Unknown' }}</td>
+              <td class="d-none d-lg-table-cell small">{{ e.get('ip_address') or 'unknown' }}</td>
+              <td class="d-none d-lg-table-cell">
+                {% if e.get('result') == 'success' %}
+                <span class="text-success small"><i class="fas fa-check"></i> Success</span>
+                {% elif e.get('result') == 'failure' %}
+                <span class="text-danger small"><i class="fas fa-times"></i> Failed</span>
+                {% else %}
+                <span class="text-muted small"><i class="fas fa-minus"></i> Recorded</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+            {% else %}
+            <tr>
+              <td colspan="5" class="text-center text-muted py-5">
+                <i class="fas fa-shield-alt fa-2x mb-2 d-block"></i>
+                No login history recorded for this user yet.
+              </td>
+            </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+      {% if total > 20 %}
+      <div class="card-footer text-muted small">Page {{ page }} &middot; {{ total }} event(s)</div>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if active_sessions %}
+  <div class="col-lg-5">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span class="fw-semibold"><i class="fas fa-laptop me-2"></i>Active Sessions</span>
+        <span class="text-muted small">{{ active_sessions|length }}</span>
+      </div>
+      <div class="card-body">
+        {% for s in active_sessions %}
+        <div class="border rounded p-3 mb-3">
+          <div class="d-flex justify-content-between align-items-start gap-2">
+            <div>
+              <div class="fw-semibold small">
+                <i class="fas fa-desktop me-1 text-primary"></i>
+                {{ s.get('device_name')|default('Unknown device') }}
+              </div>
+              <div class="text-muted" style="font-size: 0.8rem">
+                IP {{ s.get('ip_address') or 'unknown' }}
+              </div>
+              <div class="text-muted" style="font-size: 0.8rem">
+                Started {{ s.get('created_at') or 'unknown' }}
+                {% if s.get('last_activity_at') %}
+                &middot; last active {{ s.get('last_activity_at') }}
+                {% endif %}
+              </div>
+            </div>
+            <form method="POST"
+                  action="{{ url_for('admin.revoke_user_session', user_id=user.id, session_id=s.id) }}"
+                  onsubmit="return confirm('End this session? The user will be signed out on that device.');">
+                {{ csrf_input() }}
+              {{ csrf_input() }}
+              <button type="submit" class="btn btn-outline-danger btn-sm">
+                <i class="fas fa-power-off me-1"></i>End
+              </button>
+            </form>
+          </div>
+        </div>
+        {% endfor %}
+        <form method="POST" action="{{ url_for('admin.revoke_all_user_sessions', user_id=user.id) }}"
+              onsubmit="return confirm('End all active sessions for this user?');">
+                {{ csrf_input() }}
+          {{ csrf_input() }}
+          <button type="submit" class="btn btn-danger btn-sm w-100">
+            <i class="fas fa-power-off me-1"></i>End all sessions for this user
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,92 @@
+{% extends "admin/base.html" %} {% block title %}Failed Attempts - Admin{%
+endblock %} {% block page_title %}Failed Attempts{% endblock %} {% block
+content %}
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4">
+  <div>
+    <h4 class="fw-bold mb-0">Failed Login Attempts</h4>
+    <p class="text-muted mb-0">
+      Identifiers are reduced to the minimum needed for rate limiting. Passwords
+      are never stored.
+    </p>
+  </div>
+  <a href="{{ url_for('admin.user_security') }}" class="btn btn-outline-secondary btn-sm">
+    <i class="fas fa-arrow-left me-1"></i>User security
+  </a>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <form method="GET" action="{{ url_for('admin.failed_attempts') }}" class="row g-2 align-items-end">
+      <div class="col-sm-8 col-md-6">
+        <label class="form-label small fw-semibold text-muted">Search identifier</label>
+        <input type="text" name="search" class="form-control" placeholder="Masked identifier or domain"
+               value="{{ search }}" />
+      </div>
+      <div class="col-sm-2 col-md-2">
+        <button type="submit" class="btn btn-primary w-100">
+          <i class="fas fa-search"></i>
+        </button>
+      </div>
+      <div class="col-sm-2 col-md-2">
+        <a href="{{ url_for('admin.failed_attempts') }}" class="btn btn-outline-secondary w-100">Reset</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span class="fw-semibold"><i class="fas fa-ban me-2"></i>Attempts</span>
+    <span class="text-muted small">{{ total }} attempt(s)</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead>
+        <tr>
+          <th>When</th>
+          <th>Identifier</th>
+          <th class="d-none d-lg-table-cell">User</th>
+          <th class="d-none d-lg-table-cell">Device</th>
+          <th>IP</th>
+          <th>Category</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if attempts %}
+        {% for a in attempts %}
+        <tr>
+          <td class="text-nowrap small">{{ a.get('attempted_at')|default('unknown') }}</td>
+          <td class="small">{{ a.get('email_masked')|default('unknown') }}</td>
+          <td class="d-none d-lg-table-cell small">
+            {% if a.get('user_id') %}#{{ a.get('user_id') }}{% else %}
+            <span class="text-muted">Unknown</span>
+            {% endif %}
+          </td>
+          <td class="d-none d-lg-table-cell small">{{ a.get('device_description')|default('Unknown') }}</td>
+          <td class="small">{{ a.get('ip_address')|default('unknown') }}</td>
+          <td>
+            <span class="badge bg-danger bg-opacity-10 text-danger">
+              {{ a.get('failure_category')|default('invalid_credentials')|replace('_', ' ')|title }}
+            </span>
+            {% if a.get('rate_limited') %}
+            <span class="badge bg-warning bg-opacity-10 text-warning ms-1">Rate limited</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+        {% else %}
+        <tr>
+          <td colspan="6" class="text-center text-muted py-5">
+            <i class="fas fa-ban fa-2x mb-2 d-block"></i>
+            No failed login attempts recorded.
+          </td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+  {% if total > 25 %}
+  <div class="card-footer text-muted small">Page {{ page }} &middot; {{ total }} attempt(s)</div>
+  {% endif %}
+</div>
+{% endblock %}

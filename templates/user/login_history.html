@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+{% block title %}Login History - StudyHub{% endblock %}
+{% block content %}
+<div class="container py-4 fade-in">
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+        <div>
+            <h1 class="fw-bold mb-1">Login History</h1>
+            <p class="text-muted mb-0">
+                Every sign-in, sign-out and session change recorded for your account,
+                newest first.
+            </p>
+        </div>
+        <a href="{{ url_for('user.profile') }}" class="btn btn-outline-primary btn-sm">
+            <i class="fas fa-arrow-left me-1"></i>Back to Profile
+        </a>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-lg-7">
+            <div class="card">
+                <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+                    <span class="fw-semibold"><i class="fas fa-shield-alt me-2"></i>Security Activity</span>
+                    <select class="form-select form-select-sm w-auto"
+                            onchange="if(this.value){location='{{ url_for('user.login_history') }}?event_type='+this.value}else{location='{{ url_for('user.login_history') }}'}">
+                        <option value="">All events</option>
+                        <option value="login_success" {% if event_type == 'login_success' %}selected{% endif %}>Successful logins</option>
+                        <option value="logout" {% if event_type == 'logout' %}selected{% endif %}>Logouts</option>
+                        <option value="session_revoked" {% if event_type == 'session_revoked' %}selected{% endif %}>Revoked sessions</option>
+                        <option value="session_replaced" {% if event_type == 'session_replaced' %}selected{% endif %}>Replaced sessions</option>
+                        <option value="session_expired" {% if event_type == 'session_expired' %}selected{% endif %}>Expired sessions</option>
+                        <option value="login_failed" {% if event_type == 'login_failed' %}selected{% endif %}>Failed attempts</option>
+                    </select>
+                </div>
+                <div class="card-body p-0">
+                    {% if history %}
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0 align-middle">
+                            <thead>
+                                <tr>
+                                    <th scope="col">When</th>
+                                    <th scope="col">Event</th>
+                                    <th scope="col" class="d-none d-md-table-cell">Device</th>
+                                    <th scope="col" class="d-none d-lg-table-cell">IP address</th>
+                                    <th scope="col" class="d-none d-lg-table-cell">Result</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for e in history %}
+                                <tr>
+                                    <td class="text-nowrap small">
+                                        {% set when = e.get('created_at') %}
+                                        {% if when %}
+                                            <span class="d-block fw-medium">
+                                                {{ (when.strftime('%d %b %Y') if when.strftime is defined else when|string)[:11] }}
+                                            </span>
+                                            <small class="text-muted">
+                                                {{ (when.strftime('%H:%M') if when.strftime is defined else '') }}
+                                            </small>
+                                        {% else %}-{% endif %}
+                                    </td>
+                                    <td>
+                                        {% if e.get('event_type') == 'login_success' %}
+                                            <span class="badge bg-success bg-opacity-10 text-success"><i class="fas fa-sign-in-alt me-1"></i>Login</span>
+                                        {% elif e.get('event_type') == 'logout' %}
+                                            <span class="badge bg-secondary bg-opacity-10 text-secondary"><i class="fas fa-sign-out-alt me-1"></i>Logout</span>
+                                        {% elif e.get('event_type') == 'login_failed' %}
+                                            <span class="badge bg-danger bg-opacity-10 text-danger"><i class="fas fa-times-circle me-1"></i>Failed login</span>
+                                        {% elif e.get('event_type') == 'session_revoked' %}
+                                            <span class="badge bg-danger bg-opacity-10 text-danger"><i class="fas fa-user-shield me-1"></i>Session ended</span>
+                                        {% elif e.get('event_type') == 'session_replaced' %}
+                                            <span class="badge bg-warning bg-opacity-10 text-warning"><i class="fas fa-exchange-alt me-1"></i>Replaced</span>
+                                        {% elif e.get('event_type') == 'session_expired' %}
+                                            <span class="badge bg-info bg-opacity-10 text-info"><i class="fas fa-clock me-1"></i>Expired</span>
+                                        {% elif e.get('event_type') == 'admin_revoked' %}
+                                            <span class="badge bg-dark bg-opacity-10 text-body"><i class="fas fa-user-lock me-1"></i>Admin ended</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary bg-opacity-10 text-secondary">{{ e.get('event_type') or 'Event' }}</span>
+                                        {% endif %}
+                                        {% if e.get('failure_reason') %}
+                                            <div class="small text-muted mt-1">{{ e.failure_reason }}</div>
+                                        {% endif %}
+                                    </td>
+                                    <td class="d-none d-md-table-cell small">{{ e.get('device_description') or 'Unknown device' }}</td>
+                                    <td class="d-none d-lg-table-cell small">{{ e.get('ip_address') or 'unknown' }}</td>
+                                    <td class="d-none d-lg-table-cell">
+                                        {% if e.get('result') == 'success' %}
+                                            <span class="text-success small"><i class="fas fa-check me-1"></i>Success</span>
+                                        {% elif e.get('result') == 'failure' %}
+                                            <span class="text-danger small"><i class="fas fa-times me-1"></i>Failed</span>
+                                        {% else %}
+                                            <span class="text-muted small"><i class="fas fa-minus me-1"></i>Recorded</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="text-center text-muted py-5">
+                        <i class="fas fa-shield-alt fa-3x mb-3 opacity-50"></i>
+                        <p class="mb-1 fw-medium">No security activity yet</p>
+                        <small>Your login and session events will appear here.</small>
+                    </div>
+                    {% endif %}
+                </div>
+                {% if total > 15 %}
+                <div class="card-footer d-flex justify-content-between align-items-center">
+                    <span class="text-muted small">Page {{ page }}</span>
+                    <span class="text-muted small">{{ total }} event(s) total</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="col-lg-5">
+            <div class="card mb-4">
+                <div class="card-header fw-semibold">
+                    <i class="fas fa-laptop me-2"></i>My Active Sessions
+                </div>
+                <div class="card-body">
+                    {% if active_sessions %}
+                        {% for s in active_sessions %}
+                        <div class="border rounded p-3 mb-3">
+                            <div class="d-flex justify-content-between align-items-start gap-2">
+                                <div>
+                                    <div class="fw-semibold small">
+                                        <i class="fas fa-{{ 'mobile-alt' if (s.get('operating_system') or '').startswith('iOS') or (s.get('operating_system') or '').startswith('Android') else 'desktop' }} me-1 text-primary"></i>
+                                        {{ s.get('device_name') or 'Unknown device' }}
+                                    </div>
+                                    <div class="text-muted" style="font-size:0.8rem;">
+                                        IP {{ s.get('ip_address') or 'unknown' }}
+                                    </div>
+                                    <div class="text-muted" style="font-size:0.8rem;">
+                                        Started {{ s.get('created_at') or 'unknown' }}
+                                        {% if s.get('last_activity_at') %}
+                                            &middot; last active {{ s.get('last_activity_at') }}
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                {% if current_session and current_session.get('id') == s.get('id') %}
+                                    <span class="badge bg-success bg-opacity-10 text-success align-self-start">This device</span>
+                                {% else %}
+                                    <form method="POST"
+                                          action="{{ url_for('user.revoke_session', session_id=s.get('id')) }}"
+                                          class="align-self-start">
+                {{ csrf_input() }}
+                                        {{ csrf_input() }}
+                                        <button type="submit" class="btn btn-outline-danger btn-sm"
+                                                onclick="return confirm('End this session? The device will be signed out.')">
+                                            <i class="fas fa-power-off me-1"></i>End
+                                        </button>
+                                    </form>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endfor %}
+
+                        {% if active_sessions|length > 1 %}
+                        <form method="POST" action="{{ url_for('user.revoke_all_sessions') }}">
+                {{ csrf_input() }}
+                            {{ csrf_input() }}
+                            <button type="submit" class="btn btn-danger btn-sm w-100"
+                                    onclick="return confirm('End all other sessions? You will stay signed in here.')">
+                                <i class="fas fa-power-off me-1"></i>End all other sessions
+                            </button>
+                        </form>
+                        {% endif %}
+                    {% else %}
+                        <div class="text-center text-muted py-4">
+                            <i class="fas fa-laptop fa-2x mb-2 opacity-50"></i>
+                            <p class="mb-0 small">No active sessions.</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header fw-semibold"><i class="fas fa-info-circle me-2"></i>What we record</div>
+                <div class="card-body">
+                    <p class="text-muted small mb-2">
+                        For each sign-in we keep the time, a short browser and
+                        operating system description, and the IP address the
+                        request came from. This is used to show your sessions and
+                        to protect the account.
+                    </p>
+                    <ul class="text-muted small mb-0 ps-3">
+                        <li>We do not store device fingerprints.</li>
+                        <li>Passwords are never written to the history.</li>
+                        <li>Only you and StudyHub administrators can see this page.</li>
+                        <li>Entries are kept for {{ retention_days }} days.</li>
+                        <li>Device descriptions are best effort and can be missing or spoofed.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

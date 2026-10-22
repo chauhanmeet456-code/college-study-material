@@ -1,0 +1,70 @@
+{% extends "admin/base.html" %} {% block title %}Settings - Admin{% endblock %}
+{% block page_title %}Settings{% endblock %} {% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-6">
+    <div class="card">
+      <div class="card-body">
+                <form method="POST" action="{{ url_for('admin.settings') }}" novalidate>
+                {{ csrf_input() }}
+                  <div class="mb-3">
+                    <label for="site_name" class="form-label">Site Name</label>
+                    <input
+                      type="text"
+                      class="form-control"
+                      id="site_name"
+                      name="site_name"
+                      value="{{ settings.get('site_name', 'StudyHub') }}"
+                    />
+                  </div>
+                  <div class="mb-3">
+                    <label for="site_description" class="form-label"
+                      >Site Description</label
+                    >
+                    <textarea
+                      class="form-control"
+                      id="site_description"
+                      name="site_description"
+                      rows="2"
+                    >{{ settings.get('site_description', 'Your one-stop destination for all 3rd year college study materials.') }}</textarea>
+                  </div>
+                  <div class="mb-3">
+                    <label for="contact_email" class="form-label">Contact Email</label>
+                    <input
+                      type="email"
+                      class="form-control"
+                      id="contact_email"
+                      name="contact_email"
+                      value="{{ settings.get('contact_email', 'support@studyhub.edu') }}"
+                    />
+                  </div>
+                  <div class="mb-3">
+                    <label for="support_email" class="form-label">Support Email</label>
+                    <input
+                      type="email"
+                      class="form-control"
+                      id="support_email"
+                      name="support_email"
+                      value="{{ settings.get('support_email', 'support@studyhub.edu') }}"
+                    />
+                  </div>
+                  <div class="mb-3">
+                    <label for="footer_text" class="form-label">Footer Text</label>
+                    <input
+                      type="text"
+                      class="form-control"
+                      id="footer_text"
+                      name="footer_text"
+                      value="{{ settings.get('footer_text', 'StudyHub. All rights reserved.') }}"
+                    />
+                  </div>
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary">
+              <i class="fas fa-save me-2"></i>Save Settings
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
