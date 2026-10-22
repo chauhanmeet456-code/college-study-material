@@ -12,17 +12,26 @@
 - Easier for development and testing
 - MySQL better for concurrent users in production
 
-## Authentication: Session-Based
+## Authentication: Session-Based with OTP
 
-### Decision: Flask session-based authentication
-- Store `user_id` and `admin_id` in session
+### Decision: Flask session-based authentication with OTP verification
+- Two-step login: password verification, then OTP verification
+- OTP sent via email (SMTP) or flashed to user in development mode
+- Session-based with `user_id` and `admin_id` stored in the Flask session cookie
+- Server-side session validation: a SHA-256 hash of a random session token is
+  stored in the `user_sessions` table and validated on every protected request via
+  `before_request`
 - Separate sessions for users and admins
+- Single active session per user with multi-device conflict detection
 
 ### Rationale
 - Simple to implement
 - No JWT complexity
 - Sufficient for this application scale
 - Easy to logout by clearing session
+- OTP adds a second factor without requiring a separate app
+- Server-side validation means a stolen/replayed cookie cannot access a revoked session
+- Single active session prevents session sharing and improves security
 
 ## File Storage: Local Filesystem
 
@@ -78,9 +87,10 @@
 ## Search Implementation
 
 ### Decision: Server-side search with AJAX
-- API endpoint `/api/search`
+- API endpoint `/api/search` with filters (subject, category, file_type) and sort options
+- `/api/search/suggestions` for real-time autocomplete suggestions
 - Debounced input
-- Real-time suggestions
+- Returns JSON with paginated results
 
 ### Rationale
 - Better performance than client-side
@@ -115,6 +125,24 @@
 - Secure by default
 - No plain text storage
 - Salt automatically handled
+
+## Session Security & CSRF Protection
+
+### Decision: Server-side sessions with token hashing and CSRF tokens
+- Random session token generated on each login (not reused from pre-auth session)
+- Only the SHA-256 hash of the token is persisted in `user_sessions`; the raw token lives solely in the signed Flask cookie
+- `before_request` validates the server-side session on every protected request: checks `status='active'`, absolute `expires_at`, and idle timeout
+- Single active session: when a new login would exceed `MAX_ACTIVE_SESSIONS_PER_USER`, the old session is revoked inside an atomic transaction (`BEGIN IMMEDIATE` for SQLite)
+- CSRF token generated per session and validated on all POST/PUT/PATCH/DELETE routes via `@csrf_protect`
+- Login rate limiting: 5 attempts per 15-minute window per identifier and IP
+- Security response headers: CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy
+- Session cookies: HttpOnly=True, SameSite=Lax, Secure configurable via env
+
+### Rationale
+- A revoked or expired session cannot be reused even if the cookie is retained
+- CSRF tokens prevent cross-site request forgery on state-changing operations
+- Rate limiting mitigates brute-force attacks on the login endpoint
+- Security headers provide defense-in-depth against common browser-based attacks
 
 ## Error Handling
 

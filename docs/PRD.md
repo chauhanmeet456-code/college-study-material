@@ -16,13 +16,20 @@ StudyHub is a college study material management platform designed to help studen
 - View material details
 
 ### 2. Student Features (Registered Users)
-- Create account and login
+- Register and create account
+- Login with OTP verification (email or development OTP without SMTP)
+- Logout
+- Single active session with multi-device conflict detection
 - View unlimited materials
 - Download materials
 - Add/remove favorites
 - Update profile
-- Change password
 - Upload profile picture
+- Change password
+- Forgot password via OTP reset
+- Request account deletion with OTP confirmation
+- View login history and active sessions
+- View PDFs, DOC/DOCX/TXT inline, PPT/PPTX download, video playback
 
 ### 3. Admin Features
 - Admin dashboard with statistics
@@ -36,28 +43,30 @@ StudyHub is a college study material management platform designed to help studen
 ## Functional Requirements
 
 ### Material Management
-- Upload files: PDF, DOC, DOCX, PPT, PPTX, ZIP, TXT
-- Maximum file size: 50MB
+- Upload files: PDF, DOC, DOCX, PPT, PPTX, ZIP, TXT, images (PNG/JPG/JPEG/GIF/WebP), video (MP4, WebM, AVI, MOV, etc.)
+- Maximum file size: 5 GB
 - Categorize materials by type
 - Associate materials with subjects
 - Mark materials as featured
 - View/download counts tracking
 
 ### User Management
-- User registration with email validation
+- User registration (no email verification required)
 - Secure password hashing
+- OTP-based login verification
 - User activation/deactivation
 - Profile management
 
 ### Search & Discovery
-- Full-text search
+- Full-text search (title and description)
 - Filter by subject, category, file type
-- Sort by latest, popular, downloads, views
-- Search suggestions
+- Sort by latest, oldest, most downloaded, most viewed, A-Z
+- Search suggestions via `/api/search/suggestions`
+- AJAX-powered search with pagination
 
 ### Guest Limits
-- View limit: 2 materials
-- Download limit: 2 materials
+- View limit: 4 materials
+- Download limit: 4 materials
 - Encourages registration
 
 ## Non-Functional Requirements
@@ -66,6 +75,11 @@ StudyHub is a college study material management platform designed to help studen
 - Fast page loads
 - Secure file uploads
 - SQLite/MySQL database support
+- CSRF protection on all state-changing operations
+- Login rate limiting to prevent brute-force attacks
+- Server-side session validation with token hashing
+- Password hashing (PBKDF2)
+- Security response headers (CSP, X-Frame-Options, etc.)
 
 ## Success Metrics
 - User registrations

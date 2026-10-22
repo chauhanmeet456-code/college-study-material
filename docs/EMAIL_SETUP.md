@@ -86,13 +86,18 @@ APP_NAME=StudyHub
 
 ## Testing Without Email
 
-If email is not configured, the system will:
-1. Generate OTP successfully
-2. Print OTP to console/terminal
-3. Return success response
-4. OTP will be visible in server logs
+If email (SMTP) is not configured (`MAIL_USERNAME` and `MAIL_PASSWORD` are not set
+in `.env`), the system will:
 
-This allows testing without SMTP setup.
+1. Generate the OTP successfully
+2. Display the OTP directly to the user via an on-page flash message
+   (e.g., "Email is not configured, so the development OTP is 123456")
+3. For API-based OTP endpoints (`/api/send-otp`), the OTP is returned in the JSON
+   response in a `otp` field
+4. The OTP expires after 3 minutes and allows a maximum of 3 attempts
+
+This allows testing authentication flows without an SMTP server. **Do not use
+this mode in production** — the OTP is visible to anyone who can see the page.
 
 ## Troubleshooting
 

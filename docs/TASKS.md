@@ -76,18 +76,18 @@
 ### Security
 - [x] Password hashing
 - [x] Session management
-- [ ] CSRF protection
-- [ ] Rate limiting
-- [ ] Input sanitization
-- [ ] XSS prevention
+- [x] CSRF protection (all POST forms and state-changing routes)
+- [x] Rate limiting (login rate limiting, 5 attempts per 15 minutes)
+- [x] Input sanitization (secure_filename, file type whitelist, parameterized queries)
+- [x] XSS prevention (Jinja2 auto-escaping + explicit `|e` filters)
 
 ## Phase 3: Production Readiness 📋
 
 ### Testing
-- [ ] Unit tests for models
-- [ ] Integration tests for routes
-- [ ] API endpoint tests
-- [ ] Frontend component tests
+- [x] Unit tests for models (tests_project.py, tests_session_management.py, tests_session_edge_cases.py)
+- [x] Integration tests for routes (tests_project.py, tests_session_management.py)
+- [x] API endpoint tests (tests_project.py)
+- [ ] Frontend component tests (no browser automation available)
 - [ ] Load testing
 
 ### Documentation
@@ -122,18 +122,18 @@
 - [ ] Database query optimization
 
 ### Next Up
-- [ ] Add forgot password functionality
-- [ ] Email notifications
+- [x] Add forgot password functionality (OTP-based reset)
+- [x] Email notifications (OTP via SMTP / development mode)
 - [ ] Advanced search filters
 - [ ] Material ratings/reviews
 - [ ] User comments
 
 ## Known Issues
-1. 404.html not found error when material doesn't exist
-2. Search suggestions not populating
+1. ~~404.html not found error when material doesn't exist~~ — **Fixed**: 404.html is now in `static/` and served by the error handler
+2. Search suggestions not populating — `/api/search/suggestions` endpoint implemented; verify in browser
 3. Bootstrap API deprecation warnings
-4. Missing CSRF protection
-5. No email verification
+4. ~~Missing CSRF protection~~ — **Fixed**: CSRF protection applied to all POST forms and state-changing routes
+5. No email verification (OTP is used instead)
 
 ## Future Enhancements
 - Multi-file upload

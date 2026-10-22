@@ -42,7 +42,7 @@
 | Flask app creates successfully                 | App object created without errors      | App created with 78 routes         | **PASS** |
 | Routes registered                              | >0 routes                              | 78 routes                          | **PASS** |
 | No duplicate routes                            | No duplicate route definitions         | None found                         | **PASS** |
-| All Python files compile                       | 0 syntax errors                        | 0 errors across 24 files           | **PASS** |
+| All Python files compile                       | 0 syntax errors                        | 0 errors across 27 files           | **PASS** |
 | All templates parse                            | 0 Jinja2 syntax errors                 | 0 errors across 49 templates       | **PASS** |
 | GET / (Homepage)                               | 200 OK                                 | 200 OK                             | **PASS** |
 | GET /subjects                                  | 200 OK                                 | 200 OK                             | **PASS** |
@@ -210,11 +210,14 @@ python app.py
 ### Run Tests
 
 ```bash
+# Comprehensive test suite (runs from project root)
+python tests/tests_project.py
+
 # Session management tests (40 tests)
-python tests_session_management.py
+python tests/tests_session_management.py
 
 # Edge case tests (29 tests)
-python tests_session_edge_cases.py
+python tests/tests_session_edge_cases.py
 ```
 
 ### Production Deployment

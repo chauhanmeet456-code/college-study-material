@@ -28,10 +28,12 @@ college-study-material/
 ├── .env.example
 ├── init_sqlite.py
 ├── models/
+│   ├── __init__.py
 │   ├── user.py
 │   ├── admin.py
 │   ├── subject.py
 │   ├── material.py
+│   ├── session.py
 │   ├── settings.py
 │   └── message.py
 ├── routes/
@@ -59,31 +61,42 @@ college-study-material/
 │   ├── auth/
 │   │   ├── login.html
 │   │   ├── register.html
-│   │   └── forgot_password.html
+│   │   ├── forgot_password.html
+│   │   └── reset_password.html
 │   ├── admin/
 │   │   ├── base.html
 │   │   ├── login.html
 │   │   ├── dashboard.html
 │   │   ├── subjects.html
+│   │   ├── add_subject.html
+│   │   ├── edit_subject.html
 │   │   ├── add_material.html
 │   │   ├── edit_material.html
+│   │   ├── materials.html
 │   │   ├── users.html
+│   │   ├── user_detail.html
 │   │   ├── messages.html
+│   │   ├── message_detail.html
 │   │   ├── categories.html
 │   │   ├── announcements.html
 │   │   ├── settings.html
 │   │   ├── profile.html
+│   │   ├── forgot_password.html
+│   │   ├── reset_password.html
 │   │   ├── deleted_users.html
 │   │   ├── deletion_requests.html
-│   │   └── ...
+│   │   ├── user_security.html
+│   │   ├── user_login_history.html
+│   │   ├── audit_log.html
+│   │   └── failed_attempts.html
 │   └── user/
 │       ├── profile.html
 │       ├── favorites.html
-│       └── confirm_delete_account.html
+│       ├── confirm_delete_account.html
+│       └── login_history.html
 ├── static/
-│   ├── css/
-│   ├── js/
-│   │   └── main.js
+│   ├── 404.html
+│   ├── 500.html
 │   ├── images/
 │   └── uploads/
 │       ├── assignments/
@@ -98,13 +111,13 @@ college-study-material/
 ├── utils/
 │   ├── database.py
 │   ├── auth.py
+│   ├── decorators.py
+│   ├── device.py
+│   ├── guest_activity.py
 │   ├── helpers.py
 │   ├── otp.py
-│   ├── guest_activity.py
-│   └── decorators.py
-├── scripts/
-│   └── add_more_subjects.py
-└── instance/
+│   └── security.py
+├── instance/
     └── college_study.sqlite
 ```
 
@@ -218,13 +231,20 @@ Visit: http://127.0.0.1:5000
 
 ## Security
 
-- Passwords hashed with Werkzeug
+- Passwords hashed with Werkzeug (PBKDF2)
+- OTP-based authentication (login, password reset, account deletion)
+- Server-side session validation with SHA-256 token hashing
+- Single active session per user with multi-device conflict detection
+- Login rate limiting (5 attempts per 15-minute window)
+- CSRF protection on all POST forms and state-changing routes
+- Session cookie hardening (HttpOnly, SameSite=Lax, Secure configurable)
+- Security response headers (CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy)
 - Flask session management
-- Admin authentication decorators
+- Admin authentication decorators (`@admin_required`, `@user_required`)
 - Secure file upload validation
 - Environment variables for credentials
 - SQL injection prevention via parameterized queries
-- XSS protection via Jinja2 auto-escaping
+- XSS protection via Jinja2 auto-escaping and explicit `|e` filters
 - Soft delete for users with OTP confirmation
 - Inactive materials hidden from public access
 
