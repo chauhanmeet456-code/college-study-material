@@ -17,7 +17,6 @@ Run: python tests_project.py
 import os
 import re
 import sys
-import sqlite3
 
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, root)
@@ -25,8 +24,8 @@ os.chdir(root)
 
 from app import create_app
 from models.user import User
-from models.session import UserSession, LoginHistory, FailedLoginAttempt
 from utils.otp import OTPManager
+from utils.database import get_connection, get_cursor, close_cursor
 from config import Config
 
 OTPManager.send_otp_email = staticmethod(lambda *a, **k: True)
@@ -67,22 +66,26 @@ def setup_database():
             u = User.get_by_email(EMAIL)
             User.update(u["id"], is_active=1)
         uid = u["id"]
-        conn = sqlite3.connect(Config.SQLITE_DB)
-        conn.execute("DELETE FROM user_sessions WHERE user_id=?", (uid,))
-        conn.execute("DELETE FROM login_history WHERE user_id=?", (uid,))
-        conn.execute(
+        conn = get_connection()
+        cursor = get_cursor(conn)
+        cursor.execute("DELETE FROM user_sessions WHERE user_id=?", (uid,))
+        cursor.execute("DELETE FROM login_history WHERE user_id=?", (uid,))
+        cursor.execute(
             "DELETE FROM failed_login_attempts WHERE email_masked LIKE ?", ("%test%",)
         )
         conn.commit()
+        close_cursor(cursor)
         conn.close()
         return uid, EMAIL
 
 
 def get_test_material_id():
     with app.app_context():
-        conn = sqlite3.connect(Config.SQLITE_DB)
-        conn.row_factory = sqlite3.Row
-        row = conn.execute("SELECT id FROM materials LIMIT 1").fetchone()
+        conn = get_connection()
+        cursor = get_cursor(conn)
+        cursor.execute("SELECT id FROM materials LIMIT 1")
+        row = cursor.fetchone()
+        close_cursor(cursor)
         conn.close()
         return row["id"] if row else None
 
@@ -241,11 +244,13 @@ def test_registration():
     with app.app_context():
         u = User.get_by_email(new_email)
         if u:
-            conn = sqlite3.connect(Config.SQLITE_DB)
-            conn.execute("DELETE FROM user_sessions WHERE user_id=?", (u["id"],))
-            conn.execute("DELETE FROM login_history WHERE user_id=?", (u["id"],))
-            conn.execute("DELETE FROM users WHERE id=?", (u["id"],))
+            conn = get_connection()
+            cursor = get_cursor(conn)
+            cursor.execute("DELETE FROM user_sessions WHERE user_id=?", (u["id"],))
+            cursor.execute("DELETE FROM login_history WHERE user_id=?", (u["id"],))
+            cursor.execute("DELETE FROM users WHERE id=?", (u["id"],))
             conn.commit()
+            close_cursor(cursor)
             conn.close()
 
 
@@ -406,14 +411,22 @@ def test_database():
     """Test 13: Database integrity."""
     print("\n--- Database ---")
     with app.app_context():
-        conn = sqlite3.connect(Config.SQLITE_DB)
-        conn.row_factory = sqlite3.Row
-        tables = conn.execute(
+        conn = get_connection()
+        cursor = get_cursor(conn)
+        cursor.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()
+        ) if Config.USE_SQLITE else cursor.execute(
+            "SELECT tablename as name FROM pg_tables WHERE schemaname='public'"
+        )
+        tables = cursor.fetchall()
         test("Database tables exist", len(tables) >= 10, f"{len(tables)} tables")
-        conn.execute("PRAGMA foreign_key_check")
+        if Config.USE_POSTGRES:
+            cursor.execute("SET CONSTRAINTS ALL DEFERRED; SET CONSTRAINTS ALL IMMEDIATE;")
+            cursor.execute("SELECT 1")
+        else:
+            cursor.execute("PRAGMA foreign_key_check")
         test("Foreign key integrity", True)
+        close_cursor(cursor)
         conn.close()
 
 
@@ -452,13 +465,15 @@ def test_contact_form():
 def cleanup(uid):
     """Clean up test data."""
     with app.app_context():
-        conn = sqlite3.connect(Config.SQLITE_DB)
-        conn.execute("DELETE FROM user_sessions WHERE user_id=?", (uid,))
-        conn.execute("DELETE FROM login_history WHERE user_id=?", (uid,))
-        conn.execute(
+        conn = get_connection()
+        cursor = get_cursor(conn)
+        cursor.execute("DELETE FROM user_sessions WHERE user_id=?", (uid,))
+        cursor.execute("DELETE FROM login_history WHERE user_id=?", (uid,))
+        cursor.execute(
             "DELETE FROM failed_login_attempts WHERE email_masked LIKE ?", ("%test%",)
         )
         conn.commit()
+        close_cursor(cursor)
         conn.close()
 
 

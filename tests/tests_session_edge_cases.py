@@ -4,7 +4,9 @@ import os
 import re
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, root)
+os.chdir(root)
 
 from app import create_app  # noqa: E402
 from models.session import (  # noqa: E402
@@ -15,7 +17,7 @@ from models.session import (  # noqa: E402
     hash_session_token,
 )
 from models.user import User  # noqa: E402
-from utils.database import immediate_transaction  # noqa: E402
+from utils.database import immediate_transaction, get_connection, get_cursor, close_cursor  # noqa: E402
 
 EMAIL = 'exact_event_user@example.com'
 PASSWORD = 'TestPass123'
@@ -59,12 +61,12 @@ def main():
 
     # --- Clean slate for this user's events
     with app.app_context():
-        import sqlite3
-        from config import Config
-        conn = sqlite3.connect(Config.SQLITE_DB)
-        conn.execute("DELETE FROM user_sessions WHERE user_id IN (?,?)", (uid, other_id))
-        conn.execute("DELETE FROM login_history WHERE user_id IN (?,?)", (uid, other_id))
+        conn = get_connection()
+        cursor = get_cursor(conn)
+        cursor.execute("DELETE FROM user_sessions WHERE user_id IN (?,?)", (uid, other_id))
+        cursor.execute("DELETE FROM login_history WHERE user_id IN (?,?)", (uid, other_id))
         conn.commit()
+        close_cursor(cursor)
         conn.close()
 
     print('=' * 70)
@@ -94,10 +96,13 @@ def main():
     with a.session_transaction() as s:
         token = s.get('session_token')
     with immediate_transaction() as conn:
-        conn.cursor().execute(
+        cursor = get_cursor(conn)
+        cursor.execute(
             "UPDATE user_sessions SET expires_at = ? WHERE session_token_hash = ?",
             (dt.datetime.now() - dt.timedelta(minutes=5), hash_session_token(token)),
         )
+        conn.commit()
+        close_cursor(cursor)
     r = a.get('/profile', follow_redirects=False)
     record('expired session blocked', r.status_code in (301, 302), 'status=%s' % r.status_code)
     with a.session_transaction() as s:
@@ -240,13 +245,13 @@ def main():
 
     # Cleanup
     with app.app_context():
-        import sqlite3
-        from config import Config
-        conn = sqlite3.connect(Config.SQLITE_DB)
-        conn.execute("DELETE FROM user_sessions WHERE user_id IN (?,?)", (uid, other_id))
-        conn.execute("DELETE FROM login_history WHERE user_id IN (?,?)", (uid, other_id))
-        conn.execute("DELETE FROM failed_login_attempts WHERE user_id IN (?,?)", (uid, other_id))
+        conn = get_connection()
+        cursor = get_cursor(conn)
+        cursor.execute("DELETE FROM user_sessions WHERE user_id IN (?,?)", (uid, other_id))
+        cursor.execute("DELETE FROM login_history WHERE user_id IN (?,?)", (uid, other_id))
+        cursor.execute("DELETE FROM failed_login_attempts WHERE user_id IN (?,?)", (uid, other_id))
         conn.commit()
+        close_cursor(cursor)
         conn.close()
     print('test rows removed')
 

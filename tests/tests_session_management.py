@@ -1,4 +1,4 @@
-﻿"""End-to-end tests for the multi-device session management system.
+"""End-to-end tests for the multi-device session management system.
 
 Run:  python tests_session_management.py
 
@@ -9,7 +9,9 @@ import os
 import sys
 import re
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, root)
+os.chdir(root)
 
 from app import create_app  # noqa: E402
 from models.session import (  # noqa: E402
@@ -18,6 +20,8 @@ from models.session import (  # noqa: E402
     UserSession,
     hash_session_token,
 )
+from utils.database import get_connection, get_cursor, close_cursor  # noqa: E402
+from config import Config  # noqa: E402
 
 TEST_EMAIL = 'session_test_user@example.com'
 TEST_PASSWORD = 'TestPass123'
@@ -52,13 +56,13 @@ def setup_test_user(app):
             user = User.get_by_email(TEST_EMAIL)
         User.update(user['id'], is_active=1)
         # Clean state from any previous run so event counts are exact.
-        import sqlite3
-        from config import Config
-        conn = sqlite3.connect(Config.SQLITE_DB)
-        conn.execute("DELETE FROM user_sessions WHERE user_id = ?", (user['id'],))
-        conn.execute("DELETE FROM login_history WHERE user_id = ?", (user['id'],))
-        conn.execute("DELETE FROM failed_login_attempts WHERE user_id = ?", (user['id'],))
+        conn = get_connection()
+        cursor = get_cursor(conn)
+        cursor.execute("DELETE FROM user_sessions WHERE user_id = ?", (user['id'],))
+        cursor.execute("DELETE FROM login_history WHERE user_id = ?", (user['id'],))
+        cursor.execute("DELETE FROM failed_login_attempts WHERE user_id = ?", (user['id'],))
         conn.commit()
+        close_cursor(cursor)
         conn.close()
         return user['id'], TEST_EMAIL
 
@@ -75,13 +79,13 @@ def revoke_all_active(user_id, reason='test cleanup'):
 
 def purge_test_rows(user_id):
     with create_app().app_context():
-        import sqlite3
-        from config import Config
-        conn = sqlite3.connect(Config.SQLITE_DB)
-        conn.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
-        conn.execute("DELETE FROM login_history WHERE user_id = ?", (user_id,))
-        conn.execute("DELETE FROM failed_login_attempts WHERE user_id = ?", (user_id,))
+        conn = get_connection()
+        cursor = get_cursor(conn)
+        cursor.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
+        cursor.execute("DELETE FROM login_history WHERE user_id = ?", (user_id,))
+        cursor.execute("DELETE FROM failed_login_attempts WHERE user_id = ?", (user_id,))
         conn.commit()
+        close_cursor(cursor)
         conn.close()
 
 

@@ -82,20 +82,18 @@ def index():
     total_students = 0
     total_subjects = len(subjects)
     try:
-        from models.user import User
-        from utils.database import get_connection, get_cursor, close_cursor
         conn = get_connection()
         cursor = get_cursor(conn)
-        cursor.execute("SELECT COUNT(*) as total FROM materials WHERE is_active = 1")
-        total_materials = cursor.fetchone()['total']
-        from models.subject import Category
-        cats = Category.get_all()
-        notes_cat = next((c for c in cats if c['name'] == 'Notes'), None)
-        if notes_cat:
-            cursor.execute("SELECT COUNT(*) as total FROM materials WHERE category_id = ? AND is_active = 1", (notes_cat['id'],))
-            total_notes = cursor.fetchone()['total']
-        cursor.execute("SELECT COUNT(*) as total FROM users WHERE is_active = 1")
-        total_students = cursor.fetchone()['total']
+        cursor.execute("""
+            SELECT
+                (SELECT COUNT(*) FROM materials WHERE is_active = 1) as total_materials,
+                (SELECT COUNT(*) FROM materials m JOIN categories c ON m.category_id = c.id WHERE c.name = 'Notes' AND m.is_active = 1) as total_notes,
+                (SELECT COUNT(*) FROM users WHERE is_active = 1) as total_students
+        """)
+        counts = cursor.fetchone()
+        total_materials = counts['total_materials']
+        total_notes = counts['total_notes']
+        total_students = counts['total_students']
         close_cursor(cursor)
         conn.close()
     except Exception:

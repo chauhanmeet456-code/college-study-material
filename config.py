@@ -7,15 +7,17 @@ class Config:
     SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key')
     MYSQL_HOST = os.getenv('DB_HOST', 'localhost')
     MYSQL_PORT = int(os.getenv('DB_PORT', 3306))
+    MYSQL_DB = os.getenv('DB_NAME', 'college_study')
     MYSQL_USER = os.getenv('DB_USER', 'root')
     MYSQL_PASSWORD = os.getenv('DB_PASSWORD', '')
-    MYSQL_DB = os.getenv('DB_NAME', 'college_study')
     MYSQL_CURSORCLASS = 'DictCursor'
     USE_SQLITE = os.getenv('USE_SQLITE', 'false').lower() == 'true'
     SQLITE_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance', 'college_study.sqlite')
+    DATABASE_URL = os.getenv('DATABASE_URL', None)
+    USE_POSTGRES = DATABASE_URL is not None and DATABASE_URL.strip() != ''
     UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'uploads')
     MAX_CONTENT_LENGTH = 5 * 1024 * 1024 * 1024
-    ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'ppt', 'pptx', 'zip', 'txt', 'mp4', 'webm', 'ogg', 'avi', 'mov', 'wmv', 'flv', 'mkv'}
+    ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'ppt', 'pptx', 'zip', 'txt', 'mp4', 'webm', 'ogg', 'avi', 'mov', 'wmv', 'flv', 'mkv', 'png', 'jpg', 'jpeg', 'gif', 'webp'}
     ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
     GUEST_VIEW_LIMIT = int(os.getenv('GUEST_VIEW_LIMIT', 4))
     GUEST_DOWNLOAD_LIMIT = int(os.getenv('GUEST_DOWNLOAD_LIMIT', 4))

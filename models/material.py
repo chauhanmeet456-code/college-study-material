@@ -299,6 +299,8 @@ class Favorite:
             cursor = get_cursor(conn)
             if Config.USE_SQLITE:
                 cursor.execute("INSERT OR IGNORE INTO favorites (user_id, material_id) VALUES (?, ?)", (user_id, material_id))
+            elif Config.USE_POSTGRES:
+                cursor.execute("INSERT INTO favorites (user_id, material_id) VALUES (%s, %s) ON CONFLICT DO NOTHING", (user_id, material_id))
             else:
                 cursor.execute("INSERT IGNORE INTO favorites (user_id, material_id) VALUES (%s, %s)", (user_id, material_id))
             conn.commit()

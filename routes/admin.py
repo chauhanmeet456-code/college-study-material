@@ -1,6 +1,5 @@
-from flask import Blueprint, render_template, request, redirect, url_for, flash, session, send_from_directory, jsonify
+from flask import Blueprint, render_template, request, redirect, url_for, flash, session, jsonify
 from werkzeug.utils import secure_filename
-from werkzeug.security import generate_password_hash
 import os
 from datetime import datetime
 from models.admin import Admin
@@ -17,7 +16,7 @@ from models.user import User
 from utils.decorators import admin_required
 from utils.auth import get_current_admin
 from utils.database import immediate_transaction
-from utils.helpers import allowed_file, generate_safe_filename, get_category_subdir, format_file_size
+from utils.helpers import allowed_file, generate_safe_filename, get_category_subdir
 from utils.security import csrf_protect
 import secrets
 from datetime import timedelta
@@ -260,7 +259,7 @@ def add_material():
                                    session.get('admin_id'), is_featured=is_featured, is_active=is_active)
                     saved_count += 1
                 if saved_count == 0:
-                    flash('No valid files found in folder. Allowed: PDF, DOC, DOCX, PPT, PPTX, ZIP, TXT, Video files.', 'danger')
+                    flash('No valid files found in folder. Allowed: PDF, DOC, DOCX, PPT, PPTX, ZIP, TXT, Images (PNG/JPG/GIF/WebP), Video files.', 'danger')
                 else:
                     flash(f'{saved_count} file(s) uploaded successfully from folder!', 'success')
                     return redirect(url_for('admin.materials_list'))
@@ -280,7 +279,7 @@ def add_material():
                     flash('Material uploaded successfully!', 'success')
                     return redirect(url_for('admin.materials_list'))
                 else:
-                    flash('Invalid file type. Allowed: PDF, DOC, DOCX, PPT, PPTX, ZIP, TXT, Video files.', 'danger')
+                    flash('Invalid file type. Allowed: PDF, DOC, DOCX, PPT, PPTX, ZIP, TXT, Images (PNG/JPG/ GIF/WebP), Video files.', 'danger')
     all_subjects = Subject.get_all(active_only=False)
     all_categories = Category.get_all()
     return render_template('admin/add_material.html', all_subjects=all_subjects, all_categories=all_categories, admin=get_current_admin())

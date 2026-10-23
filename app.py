@@ -17,7 +17,6 @@ from routes.main import main_bp
 from routes.auth import auth_bp
 from routes.user import user_bp
 from routes.admin import admin_bp
-from utils.auth import get_current_user
 from utils.database import immediate_transaction
 from utils.security import (
     apply_security_headers,

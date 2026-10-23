@@ -167,10 +167,23 @@
         gap: 0.75rem;
       }
       .sidebar-toggle {
+        display: none;
+        align-items: center;
         gap: 0.5rem;
         font-weight: 600;
         font-size: 0.9rem;
         color: var(--text-primary);
+        background: transparent;
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius);
+        padding: 0.4rem 0.75rem;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+      .sidebar-toggle:hover {
+        background-color: var(--primary-light);
+        color: var(--primary);
+        border-color: var(--primary);
       }
       .header-user i {
         color: var(--text-muted);
@@ -504,6 +517,14 @@
       {% if admin is defined %}
       <header class="top-header">
         <div class="d-flex align-items-center gap-2">
+          <button
+            class="sidebar-toggle d-lg-none"
+            id="sidebarToggle"
+            type="button"
+            title="Toggle navigation"
+          >
+            <i class="fas fa-bars"></i>
+          </button>
           <h5 class="mb-0 fw-semibold">
             {% block page_title %}Dashboard{% endblock %}
           </h5>

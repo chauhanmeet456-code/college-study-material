@@ -1,4 +1,4 @@
-from flask import session, flash
+from flask import session
 from models.user import User
 from models.admin import Admin
 
