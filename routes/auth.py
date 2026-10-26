@@ -22,7 +22,7 @@ from models.user import User
 from utils.auth import get_current_user
 from utils.device import get_request_device_info
 from utils.database import immediate_transaction
-from utils.otp import OTPManager
+from utils.otp import OTPManager, EmailDeliveryResult
 from utils.security import (
     check_login_rate_limit,
     clear_login_rate_limit,
@@ -62,6 +62,11 @@ def _clear_login_state():
     session.pop(LOGIN_VERIFIED_USER, None)
     session.pop('login_email', None)
     session.pop('login_password', None)
+
+
+def _clear_pending_otp(email, purpose):
+    """Remove a stored OTP challenge for the given email and purpose."""
+    session.pop(f'otp_{purpose}_{email}', None)
 
 
 def _record_failed_login(user_id, email, category='invalid_credentials'):
@@ -116,15 +121,57 @@ def send_otp():
             'message': 'Too many login attempts. Please try again later.',
         }, 429
 
-    otp = OTPManager.generate_otp()
-    OTPManager.store_otp(email, otp, purpose)
+    allowed, reason = OTPManager.can_resend(email, purpose)
+    if not allowed:
+        if reason == 'max_resends_reached':
+            return {
+                'success': False,
+                'message': 'You have reached the maximum of 3 resend attempts. Please try again with a new verification process later.',
+            }, 429
+        if reason and reason.startswith('cooldown'):
+            seconds = int(reason.split(':')[1])
+            return {
+                'success': False,
+                'message': 'Please wait %d seconds before requesting another code.' % seconds,
+            }, 429
 
-    if Config.MAIL_USERNAME and Config.MAIL_PASSWORD:
-        sent = OTPManager.send_otp_email(email, otp, purpose)
-        if sent:
-            return {'success': True, 'message': 'OTP sent to your email'}
-        return {'success': False, 'message': 'Failed to send OTP email'}, 500
-    return {'success': True, 'message': 'OTP generated (email not configured)', 'otp': otp}
+    if not OTPManager.is_configured():
+        return {
+            'success': False,
+            'message': "We couldn't send the verification code. Please try again later.",
+        }, 503
+
+    otp = OTPManager.generate_otp()
+    OTPManager.store_otp(email, otp, purpose, ip_address=_client_ip())
+
+    result = OTPManager.send_otp_email(email, otp, purpose)
+    if result.is_success:
+        OTPManager.increment_resend_count(email, purpose)
+        remaining = OTPManager.get_resend_remaining(email, purpose)
+        return {
+            'success': True,
+            'message': 'Verification code sent to your email address.',
+            'remaining_resends': remaining,
+        }
+    if result.is_ambiguous:
+        # The SMTP server may have accepted the message before disconnecting.
+        # Do not increment the resend counter so the user can retry if the
+        # code never arrives.
+        remaining = OTPManager.get_resend_remaining(email, purpose)
+        return {
+            'success': False,
+            'ambiguous': True,
+            'message': (
+                'The verification code may have been sent. '
+                'Please check your inbox before requesting another code.'
+            ),
+            'remaining_resends': remaining,
+        }, 202
+    return {
+        'success': False,
+        'message': "We couldn't send the verification code. Please try again later.",
+        'remaining_resends': OTPManager.get_resend_remaining(email, purpose),
+    }, 503
 
 
 @auth_bp.route('/api/verify-otp', methods=['POST'])
@@ -220,24 +267,79 @@ def _handle_credential_step():
 
     # Credentials are correct but the user is not authenticated yet: the OTP
     # step, and any multi-device confirmation, still have to succeed.
+
+    # Duplicate-submission guard: if a valid OTP challenge is already pending
+    # for this email, do not generate a new one (avoids duplicate emails from
+    # double-clicks / fast double-submits).
+    if OTPManager.is_otp_valid(email, 'login'):
+        session[PENDING_LOGIN_EMAIL] = email
+        session.permanent = True
+        flash('A verification code has already been sent. Please check your email.',
+              'info')
+        return render_template(
+            'auth/login.html',
+            current_user=get_current_user(),
+            show_otp=True,
+            login_email=email,
+            remaining_attempts=_otp_remaining_attempts(email),
+        )
+
     session[PENDING_LOGIN_EMAIL] = email
     session.permanent = True
 
+    if not OTPManager.is_configured():
+        flash("We couldn't send the verification code. Please try again later.", 'danger')
+        _clear_login_state()
+        _clear_pending_otp(email, 'login')
+        return render_template(
+            'auth/login.html',
+            current_user=get_current_user(),
+            show_otp=False,
+            email_error=True,
+        )
+
     otp_code = OTPManager.generate_otp()
-    OTPManager.store_otp(email, otp_code, 'login')
+    OTPManager.store_otp(email, otp_code, 'login', ip_address=_client_ip())
 
-    if Config.MAIL_USERNAME and Config.MAIL_PASSWORD:
-        OTPManager.send_otp_email(email, otp_code, 'login')
-    else:
-        flash('Email is not configured, so the development OTP is %s' % otp_code, 'info')
-
-    flash('OTP sent to your email. Please verify to complete login.', 'success')
+    result = OTPManager.send_otp_email(email, otp_code, 'login')
+    if result.is_success:
+        flash('Verification code sent to your email address. Please verify to complete login.',
+              'success')
+        return render_template(
+            'auth/login.html',
+            current_user=get_current_user(),
+            show_otp=True,
+            login_email=email,
+            remaining_attempts=Config.OTP_MAX_VERIFICATION_ATTEMPTS,
+        )
+    if result.is_ambiguous:
+        # The SMTP server accepted the message data but disconnected before
+        # confirming with a 250 reply.  The email may have been delivered —
+        # keep the pending OTP state and show the verification screen so the
+        # user can enter the code they received.
+        flash(
+            'We sent the verification code to your email address. '
+            'If you do not see it within a few minutes, please check your '
+            'spam folder or request another code.',
+            'info',
+        )
+        return render_template(
+            'auth/login.html',
+            current_user=get_current_user(),
+            show_otp=True,
+            login_email=email,
+            remaining_attempts=Config.OTP_MAX_VERIFICATION_ATTEMPTS,
+            delivery_ambiguous=True,
+        )
+    # Definitive delivery failure
+    flash("We couldn't send the verification code. Please try again later.", 'danger')
+    _clear_login_state()
+    _clear_pending_otp(email, 'login')
     return render_template(
         'auth/login.html',
         current_user=get_current_user(),
-        show_otp=True,
-        login_email=email,
-        remaining_attempts=3,
+        show_otp=False,
+        email_error=True,
     )
 
 
@@ -470,14 +572,28 @@ def forgot_password():
         # The same response either way, so the page cannot be used to
         # enumerate registered addresses.
         if user:
-            otp = OTPManager.generate_otp()
-            OTPManager.store_otp(email, otp, 'forgot')
-            if Config.MAIL_USERNAME and Config.MAIL_PASSWORD:
-                OTPManager.send_otp_email(email, otp, 'forgot')
-            elif user:
-                flash('Email is not configured, so the development OTP is %s' % otp, 'info')
-            session['forgot_email'] = email
-            flash('If that email is registered, an OTP has been sent.', 'info')
+            if OTPManager.is_configured():
+                session['forgot_email'] = email
+                session.permanent = True
+                otp = OTPManager.generate_otp()
+                OTPManager.store_otp(email, otp, 'forgot', ip_address=_client_ip())
+                result = OTPManager.send_otp_email(email, otp, 'forgot')
+                if result.is_success:
+                    flash('If that email is registered, an OTP has been sent.', 'info')
+                elif result.is_ambiguous:
+                    # The email may have been delivered despite the server
+                    # disconnect.  Show the same generic message as success so
+                    # the user can check their inbox and try to verify.
+                    flash(
+                        'If that email is registered, an OTP has been sent. '
+                        'If you do not receive it shortly, please check your '
+                        'spam folder.',
+                        'info',
+                    )
+                else:
+                    flash("We couldn't send the verification code. Please try again later.", 'danger')
+            else:
+                flash("We couldn't send the verification code. Please try again later.", 'danger')
         else:
             flash('If that email is registered, an OTP has been sent.', 'info')
         return redirect(url_for('auth.reset_password'))
@@ -527,7 +643,7 @@ def _otp_remaining_attempts(email):
     key = f'otp_login_{email}'
     stored = session.get(key) or {}
     attempts = stored.get('attempts', 0)
-    return max(0, 3 - attempts)
+    return max(0, Config.OTP_MAX_VERIFICATION_ATTEMPTS - attempts)
 
 
 def _active_sessions_other_than(user_id, current_session_id=None):

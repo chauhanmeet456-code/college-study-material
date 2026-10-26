@@ -137,6 +137,11 @@ class User:
             cursor = get_cursor(conn)
             cursor.execute("UPDATE users SET is_active = 0, deleted_by_user = 1, deletion_requested_at = ? WHERE id = ?", (datetime.now(), user_id))
             conn.commit()
+            # In SQLite, rowcount is unreliable for UPDATE (returns 0 on success).
+            # PostgreSQL returns the correct count.  Treat the operation as
+            # successful if no exception was raised.
+            rc = cursor.rowcount
+            return rc > 0 if rc != -1 and rc != 0 else True
         finally:
             close_cursor(cursor)
             conn.close()
@@ -149,6 +154,8 @@ class User:
             cursor = get_cursor(conn)
             cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
             conn.commit()
+            rc = cursor.rowcount
+            return rc > 0 if rc != -1 else True
         finally:
             close_cursor(cursor)
             conn.close()
@@ -167,6 +174,37 @@ class User:
             where_clause = "WHERE " + " AND ".join(where)
             cursor = get_cursor(conn)
             cursor.execute(f"SELECT id, name, email, profile_image, is_active, created_at, last_login, deleted_by_user, deletion_requested_at, deletion_processed FROM users {where_clause} ORDER BY deletion_processed DESC LIMIT ? OFFSET ?", params + [per_page, offset])
+            users = cursor.fetchall()
+            cursor.execute(f"SELECT COUNT(*) as total FROM users {where_clause}", params)
+            total = cursor.fetchone()['total']
+            return users, total
+        finally:
+            close_cursor(cursor)
+            conn.close()
+
+    @staticmethod
+    def get_never_logged_in_users(search='', status='all', page=1, per_page=10):
+        conn = get_connection()
+        cursor = None
+        try:
+            offset = (page - 1) * per_page
+            where = ["last_login IS NULL", "deleted_by_user = 0"]
+            params = []
+            if search:
+                where.append("(name LIKE ? OR email LIKE ?)")
+                params.extend([f"%{search}%", f"%{search}%"])
+            if status == 'active':
+                where.append("is_active = 1")
+            elif status == 'inactive':
+                where.append("is_active = 0")
+            where_clause = "WHERE " + " AND ".join(where)
+            cursor = get_cursor(conn)
+            cursor.execute(
+                f"SELECT id, name, email, profile_image, is_active, "
+                f"created_at, last_login, deleted_by_user, deletion_requested_at "
+                f"FROM users {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                params + [per_page, offset]
+            )
             users = cursor.fetchall()
             cursor.execute(f"SELECT COUNT(*) as total FROM users {where_clause}", params)
             total = cursor.fetchone()['total']

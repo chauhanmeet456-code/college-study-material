@@ -180,6 +180,7 @@ CREATE TABLE IF NOT EXISTS user_sessions (
     logout_at TIMESTAMP DEFAULT NULL,
     status VARCHAR(20) DEFAULT 'active',
     termination_reason TEXT DEFAULT NULL,
+    ended_by_admin INTEGER DEFAULT 0,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
@@ -187,6 +188,22 @@ CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions(session_token_hash);
 CREATE INDEX IF NOT EXISTS idx_user_sessions_status ON user_sessions(status);
 CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at ON user_sessions(expires_at);
+
+CREATE TABLE IF NOT EXISTS pending_notifications (
+    id SERIAL PRIMARY KEY,
+    recipient_email VARCHAR(255) NOT NULL,
+    subject VARCHAR(255) NOT NULL,
+    body TEXT NOT NULL,
+    purpose VARCHAR(50),
+    related_id INTEGER,
+    dedupe_key VARCHAR(255),
+    attempt INTEGER DEFAULT 0,
+    status VARCHAR(20) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_attempt_at TIMESTAMP DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pending_notif_dedupe ON pending_notifications(dedupe_key, status);
+CREATE INDEX IF NOT EXISTS idx_pending_notif_status ON pending_notifications(status, created_at);
 
 CREATE TABLE IF NOT EXISTS login_history (
     id SERIAL PRIMARY KEY,

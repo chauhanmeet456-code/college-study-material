@@ -18,6 +18,11 @@ from models.session import (  # noqa: E402
 )
 from models.user import User  # noqa: E402
 from utils.database import immediate_transaction, get_connection, get_cursor, close_cursor  # noqa: E402
+from config import Config  # noqa: E402
+
+# Tests run against the bundled SQLite database to avoid depending on an
+# external PostgreSQL / NeonDB server.
+Config.USE_POSTGRES = False
 
 EMAIL = 'exact_event_user@example.com'
 PASSWORD = 'TestPass123'
@@ -42,9 +47,10 @@ def main():
 
     # Tests must not depend on a live SMTP server; the OTP is read from the
     # signed session instead, exactly as a user would read it from email.
-    from utils.otp import OTPManager
-    OTPManager.send_email = staticmethod(lambda *a, **k: True)
-    OTPManager.send_otp_email = staticmethod(lambda *a, **k: True)
+    from utils.otp import OTPManager, RESULT_SUCCESS
+    OTPManager.send_email = staticmethod(lambda *a, **k: RESULT_SUCCESS)
+    OTPManager.send_otp_email = staticmethod(lambda *a, **k: RESULT_SUCCESS)
+    OTPManager.is_configured = staticmethod(lambda: True)
 
     with app.app_context():
         u = User.get_by_email(EMAIL)

@@ -1,4 +1,5 @@
 import os
+import time
 from datetime import datetime, timedelta
 
 from flask import (
@@ -17,7 +18,7 @@ from routes.main import main_bp
 from routes.auth import auth_bp
 from routes.user import user_bp
 from routes.admin import admin_bp
-from utils.database import immediate_transaction
+from utils.database import immediate_transaction, ensure_schema_extensions
 from utils.security import (
     apply_security_headers,
     csrf_input,
@@ -69,6 +70,14 @@ def create_app():
     app.register_blueprint(user_bp)
     app.register_blueprint(admin_bp)
 
+    # Add the ended_by_admin column and the notification queue table if they
+    # are not already present.  This is wrapped defensively so a locked-down
+    # or read-only database can never prevent the application from starting.
+    try:
+        ensure_schema_extensions()
+    except Exception:
+        pass
+
     @app.context_processor
     def inject_template_helpers():
         return {
@@ -85,6 +94,20 @@ def create_app():
             return {"settings": Settings.get_all()}
         except Exception:
             return {"settings": {}}
+
+    @app.before_request
+    def log_request_time():
+        request._start_time = time.time()
+
+    @app.after_request
+    def log_request_duration(response):
+        start = getattr(request, '_start_time', None)
+        if start is not None:
+            duration = time.time() - start
+            endpoint = request.endpoint or 'unknown'
+            if duration > 1.0:
+                print(f'[TIMING] {request.method} {endpoint} - {duration:.3f}s', flush=True)
+        return response
 
     @app.after_request
     def add_security_headers(response):
@@ -125,17 +148,39 @@ def create_app():
             return None
 
         # Either the row is gone, or its status marks it as finished.
-        previous_status = _status_of(session_token)
+        try:
+            session_row = UserSession.get_by_token_hash(hash_session_token(session_token))
+        except Exception:
+            session_row = None
+        previous_status = session_row.get('status') if session_row else 'missing'
         session.pop('session_token', None)
         session.pop('session_id', None)
         session.pop('user_id', None)
         session.pop('user_name', None)
 
         if previous_status == UserSession.STATUS_REVOKED:
-            message = (
-                'Your session has ended because your account was signed in '
-                'on another device.'
+            ended_by_admin = (session_row or {}).get('ended_by_admin') if session_row else None
+            termination_reason = (session_row or {}).get('termination_reason') or ''
+            is_admin_ended = (
+                ended_by_admin == 1 or ended_by_admin is True
+            ) or (
+                'ended_by_admin' not in (session_row or {}) and
+                'administrator' in termination_reason.lower()
             )
+            if is_admin_ended:
+                message = (
+                    'Your session was ended by a StudyHub administrator. '
+                    'Please sign in again.'
+                )
+            elif 'another device' in termination_reason.lower():
+                message = (
+                    'Your session has ended because your account was signed in '
+                    'on another device.'
+                )
+            else:
+                message = (
+                    'Your session has ended. Please log in again to continue.'
+                )
         elif previous_status == UserSession.STATUS_LOGGED_OUT:
             message = (
                 'You have been signed out on this device. '
@@ -165,6 +210,17 @@ def create_app():
             return ""
         return Markup(value.replace("\n", "<br>\n"))
 
+    @app.template_filter("format_datetime")
+    def format_datetime(value, fmt="%d %b %Y, %H:%M %p"):
+        if not value:
+            return "unknown"
+        if isinstance(value, str):
+            return value
+        try:
+            return value.strftime(fmt)
+        except (AttributeError, ValueError):
+            return str(value)
+
     return app
 
 
@@ -173,7 +229,7 @@ def create_app():
 # ---------------------------------------------------------------------------
 
 def _now_helper():
-    return datetime
+    return datetime.now()
 
 
 def _is_admin_endpoint(endpoint):

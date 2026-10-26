@@ -18,18 +18,26 @@ import os
 import re
 import sys
 
+import pytest
+
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, root)
 os.chdir(root)
 
 from app import create_app
 from models.user import User
-from utils.otp import OTPManager
+from utils.otp import OTPManager, RESULT_SUCCESS
 from utils.database import get_connection, get_cursor, close_cursor
 from config import Config
 
-OTPManager.send_otp_email = staticmethod(lambda *a, **k: True)
-OTPManager.send_email = staticmethod(lambda *a, **k: True)
+# Tests run against the bundled SQLite database to avoid depending on an
+# external PostgreSQL / NeonDB server.  This only overrides the in-process
+# Config attribute — the .env file is left untouched.
+Config.USE_POSTGRES = False
+
+OTPManager.send_otp_email = staticmethod(lambda *a, **k: RESULT_SUCCESS)
+OTPManager.send_email = staticmethod(lambda *a, **k: RESULT_SUCCESS)
+OTPManager.is_configured = staticmethod(lambda: True)
 
 app = create_app()
 results = []
@@ -39,6 +47,23 @@ def test(name, condition, detail=""):
     status = "PASS" if condition else "FAIL"
     results.append((name, status, detail))
     print(f"  [{status}] {name}" + (f": {detail}" if detail else ""))
+
+
+# Prevent pytest from collecting this helper as a test function.
+test.__test__ = False
+
+
+@pytest.fixture
+def uid():
+    """Pytest fixture: create (or reuse) the test user and return its id."""
+    uid_val, _email = setup_database()
+    return uid_val
+
+
+@pytest.fixture
+def mat_id():
+    """Pytest fixture: return the id of the first material row, or None."""
+    return get_test_material_id()
 
 
 def csrf_from(html):
@@ -211,6 +236,18 @@ def test_full_login_flow(uid, mat_id):
 
         r = c.get("/favorites")
         test("Favorites page", r.status_code == 200)
+
+    # Footer year test
+    from datetime import datetime
+    import re
+    current_year = str(datetime.now().year)
+    login_body = c.get("/login").get_data(as_text=True)
+    year_match = re.search(r"&copy;\s*(\d{4})", login_body)
+    test("Footer shows current year " + current_year,
+         year_match is not None and year_match.group(1) == current_year)
+    test("Broken year expression absent",
+         "attribute 'year'" not in login_body and
+         "attribute 'year'" not in login_body.replace("&amp;", "&"))
 
     # Logout
     hp = c.get("/account/login-history")
@@ -387,6 +424,49 @@ def test_security():
         "Security headers",
         "X-Content-Type-Options" in sec and "Content-Security-Policy" in sec,
     )
+
+    # --- Source-code / sensitive-file exposure ---
+    c = app.test_client()
+    sensitive_paths = [
+        "/.env", "/config.py", "/app.py", "/.gitignore",
+        "/requirements.txt", "/instance/college_study.sqlite",
+        "/static/.env", "/static/config.py", "/.git/config",
+        "/.git/HEAD", "/instance/", "/logs/",
+    ]
+    for sp in sensitive_paths:
+        r = c.get(sp)
+        test("Sensitive file not served: " + sp, r.status_code in (403, 404),
+             "status=" + str(r.status_code))
+
+    # --- Path traversal attempts ---
+    traversal_paths = [
+        "/material/1/download/../../../../../../etc/passwd",
+        "/static/../../../config.py",
+        "/static/uploads/../../app.py",
+    ]
+    for tp in traversal_paths:
+        r = c.get(tp)
+        test("Path traversal blocked: " + tp, r.status_code in (400, 403, 404),
+             "status=" + str(r.status_code))
+
+    # --- Sensitive data not in rendered pages ---
+    r = c.get("/login")
+    body = r.get_data(as_text=True)
+    for secret in ["dev-secret-key", "DATABASE_URL", "MAIL_PASSWORD",
+                    "SECRET_KEY", "password_hash", "traceback"]:
+        test("No '%s' in login page" % secret, secret.lower() not in body.lower())
+
+    r = c.get("/admin/login")
+    body = r.get_data(as_text=True)
+    for secret in ["dev-secret-key", "DATABASE_URL", "MAIL_PASSWORD"]:
+        test("No '%s' in admin login page" % secret, secret.lower() not in body.lower())
+
+    # --- Debug tracebacks not disclosed ---
+    r = c.get("/nonexistent-debug-test-page")
+    body = r.get_data(as_text=True)
+    test("No traceback in 404 page", "Traceback" not in body)
+    test("No file paths in 404 page", "Traceback" not in body and "/home/" not in body)
+    test("404 returns 404 status", r.status_code == 404)
 
 
 def test_static_assets():

@@ -89,15 +89,25 @@ APP_NAME=StudyHub
 If email (SMTP) is not configured (`MAIL_USERNAME` and `MAIL_PASSWORD` are not set
 in `.env`), the system will:
 
-1. Generate the OTP successfully
-2. Display the OTP directly to the user via an on-page flash message
-   (e.g., "Email is not configured, so the development OTP is 123456")
-3. For API-based OTP endpoints (`/api/send-otp`), the OTP is returned in the JSON
-   response in a `otp` field
-4. The OTP expires after 3 minutes and allows a maximum of 3 attempts
+1. Display the error message "We couldn't send the verification code. Please try again later."
+2. For API-based OTP endpoints (`/api/send-otp`), return a `503` JSON error.
+3. No OTP is generated, stored, or sent — the user cannot proceed with OTP verification
+   until SMTP is properly configured.
 
-This allows testing authentication flows without an SMTP server. **Do not use
-this mode in production** — the OTP is visible to anyone who can see the page.
+To test authentication flows locally without a real SMTP server, you can use
+a tool like [MailHog](https://github.com/mailhog/MailHog) or
+[smtp4dev](https://github.com/rnwood/smtp4dev/) and set the SMTP configuration
+to point at it:
+
+```
+MAIL_SERVER=localhost
+MAIL_PORT=1025
+MAIL_USERNAME=
+MAIL_PASSWORD=
+```
+
+This allows testing the full OTP flow without sending real emails. **Do not
+expose real OTP values to users under any circumstance.**
 
 ## Troubleshooting
 

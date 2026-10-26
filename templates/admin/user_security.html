@@ -171,14 +171,24 @@ endblock %} {% block page_title %}User Security{% endblock %} {% block content %
             </div>
           </div>
           {% if s.get('user_id') %}
-          <form method="POST" action="{{ url_for('admin.revoke_user_session', user_id=s.user_id, session_id=s.id) }}"
-                onsubmit="return confirm('End this session? The user will be signed out on that device.');">
-                {{ csrf_input() }}
+          <div class="btn-group btn-group-sm" role="group">
+            <form method="POST"
+                  action="{{ url_for('admin.revoke_all_user_sessions', user_id=s.user_id) }}"
+                  onsubmit="return confirm('End all active sessions for this user?');">
             {{ csrf_input() }}
-            <button type="submit" class="btn btn-outline-danger btn-sm">
-              <i class="fas fa-power-off"></i>
-            </button>
-          </form>
+              <button type="submit" class="btn btn-outline-danger" title="End all sessions for this user">
+                <i class="fas fa-power-off"></i> <span class="d-none d-sm-inline">End all</span>
+              </button>
+            </form>
+            <form method="POST"
+                  action="{{ url_for('admin.revoke_user_session', user_id=s.user_id, session_id=s.id) }}"
+                  onsubmit="return confirm('End this session? The user will be signed out on that device.');">
+            {{ csrf_input() }}
+              <button type="submit" class="btn btn-outline-secondary" title="End this session">
+                <i class="fas fa-xmark"></i> <span class="d-none d-sm-inline">End</span>
+              </button>
+            </form>
+          </div>
           {% endif %}
         </div>
         {% endfor %}

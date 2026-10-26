@@ -23,6 +23,10 @@ from models.session import (  # noqa: E402
 from utils.database import get_connection, get_cursor, close_cursor  # noqa: E402
 from config import Config  # noqa: E402
 
+# Tests run against the bundled SQLite database to avoid depending on an
+# external PostgreSQL / NeonDB server.
+Config.USE_POSTGRES = False
+
 TEST_EMAIL = 'session_test_user@example.com'
 TEST_PASSWORD = 'TestPass123'
 
@@ -61,6 +65,7 @@ def setup_test_user(app):
         cursor.execute("DELETE FROM user_sessions WHERE user_id = ?", (user['id'],))
         cursor.execute("DELETE FROM login_history WHERE user_id = ?", (user['id'],))
         cursor.execute("DELETE FROM failed_login_attempts WHERE user_id = ?", (user['id'],))
+        cursor.execute("DELETE FROM pending_notifications")
         conn.commit()
         close_cursor(cursor)
         conn.close()
@@ -106,9 +111,10 @@ def main():
 
     # Tests must not depend on a live SMTP server. The OTP is read from the
     # signed session below, exactly as it would be for a user reading email.
-    from utils.otp import OTPManager
-    OTPManager.send_email = staticmethod(lambda *a, **k: True)
-    OTPManager.send_otp_email = staticmethod(lambda *a, **k: True)
+    from utils.otp import OTPManager, RESULT_SUCCESS
+    OTPManager.send_email = staticmethod(lambda *a, **k: RESULT_SUCCESS)
+    OTPManager.send_otp_email = staticmethod(lambda *a, **k: RESULT_SUCCESS)
+    OTPManager.is_configured = staticmethod(lambda: True)
 
     user_id, email = setup_test_user(app)
 
@@ -152,10 +158,10 @@ def main():
                 follow_redirects=False)
     body2 = r2.get_data(as_text=True)
     record('multi-device conflict message shown',
-           'currently logged in on another device' in body2.lower(),
+           'already logged in' in body2.lower(),
            'status=%s' % r2.status_code)
-    record('three options offered',
-           all(k in body2 for k in ['End Other Session', 'Keep Existing Session', 'Cancel']))
+    record('two options offered',
+           all(k in body2 for k in ['End Other Session', 'Cancel']))
 
     # browser B must NOT be authenticated yet (no silent takeover)
     still_active = UserSession.get_active_sessions_for_user(user_id)
@@ -177,7 +183,7 @@ def main():
 
     print()
     print('=' * 70)
-    print('TEST 4: "Keep Existing Session" cancels the new login')
+    print('TEST 4: Cancelling via the cancel button keeps the existing session')
     print('=' * 70)
     # redo the conflict prompt for browser B
     r = login_step_one(b, email, TEST_PASSWORD)
@@ -198,7 +204,7 @@ def main():
 
     print()
     print('=' * 70)
-    print('TEST 5: "End Other Session & Login Here" replaces the session')
+    print('TEST 5: "Switch to this session" replaces the old session')
     print('=' * 70)
     r = login_step_one(b, email, TEST_PASSWORD)
     body = r.get_data(as_text=True)
@@ -377,6 +383,274 @@ def main():
     r = admin.get('/admin/users/%d/login-history' % user_id)
     record('admin can open a specific user history', r.status_code == 200,
            'status=%s' % r.status_code)
+
+    print()
+    print('=' * 70)
+    print('TEST 13: Conflict screen shows device and date/time info')
+    print('=' * 70)
+    # Re-trigger conflict for browser b
+    rb = app.test_client()
+    login_step_one(rb, email, TEST_PASSWORD)
+    with rb.session_transaction() as sess:
+        otp_c = sess.get('otp_login_%s' % email, {}).get('otp')
+    page = rb.post('/login', data={'otp': otp_c, 'csrf_token': csrf_from('')},
+                   follow_redirects=False) if False else None
+    # Get a fresh csrf token
+    pg = login_step_one(rb, email, TEST_PASSWORD)
+    tok = csrf_from(pg.get_data(as_text=True))
+    with rb.session_transaction() as sess:
+        otp_c = sess.get('otp_login_%s' % email, {}).get('otp')
+    r_conf = rb.post('/login', data={'otp': otp_c, 'csrf_token': tok},
+                     follow_redirects=False)
+    body_conf = r_conf.get_data(as_text=True)
+    record('conflict screen has explanation text',
+           'already logged in' in body_conf.lower())
+    record('conflict shows End Other Session button', 'End Other Session' in body_conf)
+    record('conflict shows Cancel button', 'Cancel' in body_conf)
+    record('conflict does not show Keep Existing button', 'Keep Existing' not in body_conf)
+    # No sensitive technical info exposed to students
+    record('conflict does not show session IDs',
+           'session_id' not in body_conf.lower() and 's.id' not in body_conf)
+
+    print()
+    print('=' * 70)
+    print('TEST 14: Admin can terminate individual active session')
+    print('=' * 70)
+    # Ensure fresh active session for the test user
+    revoke_all_active(user_id)
+    r_login = login_step_one(rb, email, TEST_PASSWORD)
+    tok2 = csrf_from(r_login.get_data(as_text=True))
+    with rb.session_transaction() as sess:
+        otp_d = sess.get('otp_login_%s' % email, {}).get('otp')
+    rb.post('/login', data={'otp': otp_d, 'csrf_token': tok2}, follow_redirects=False)
+    active_before = UserSession.get_active_sessions_for_user(user_id)
+    record('pre-test has 1 active session', len(active_before) == 1,
+           'count=%d' % len(active_before))
+    sid = active_before[0]['id'] if active_before else None
+
+    # End the session via admin panel
+    tok3 = csrf_from(admin.get('/admin/user-security').get_data(as_text=True))
+    r_end = admin.post('/admin/users/%d/revoke-session/%d' % (user_id, sid),
+                       data={'csrf_token': tok3}, follow_redirects=False)
+    record('admin End redirects (302)', r_end.status_code == 302,
+           'status=%s' % r_end.status_code)
+    row = UserSession.get_by_id(sid)
+    record('session is revoked in DB', row and row.get('status') == 'revoked',
+           'status=%s' % (row.get('status') if row else 'None'))
+
+    # Protected request from the revoked session fails
+    r_prot = rb.get('/profile', follow_redirects=False)
+    record('revoked session blocked from /profile',
+           r_prot.status_code in (301, 302), 'status=%s' % r_prot.status_code)
+
+    print()
+    print('=' * 70)
+    print('TEST 15: Admin End All revokes only selected user sessions')
+    print('=' * 70)
+    revoke_all_active(user_id)
+    # Create two sessions for user_id (via concurrent login)
+    for _ in range(2):
+        c_tmp = app.test_client()
+        lp = login_step_one(c_tmp, email, TEST_PASSWORD)
+        tok_t = csrf_from(lp.get_data(as_text=True))
+        with c_tmp.session_transaction() as s:
+            otp_t = s.get('otp_login_%s' % email, {}).get('otp')
+        c_tmp.post('/login', data={'otp': otp_t, 'csrf_token': tok_t},
+                   follow_redirects=False)
+        # Each login may replace; ensure at least one active
+    active = UserSession.get_active_sessions_for_user(user_id)
+    before_count = len(active)
+    record('at least 1 active session before end-all', before_count >= 1,
+           'count=%d' % before_count)
+
+    tok4 = csrf_from(admin.get('/admin/user-security').get_data(as_text=True))
+    r_all = admin.post('/admin/users/%d/revoke-all-sessions' % user_id,
+                       data={'csrf_token': tok4}, follow_redirects=False)
+    record('admin End All redirects (302)', r_all.status_code == 302)
+    after = UserSession.get_active_sessions_for_user(user_id)
+    record('zero active sessions after end-all', len(after) == 0,
+           'count=%d' % len(after))
+
+    print()
+    print('=' * 70)
+    print('TEST 16: Non-admin and CSRF checks on session endpoints')
+    print('=' * 70)
+    guest = app.test_client()
+    r_g = guest.post('/admin/users/%d/revoke-session/1' % user_id,
+                     data={}, follow_redirects=False)
+    record('non-admin blocked from End', r_g.status_code in (301, 302),
+           'status=%s' % r_g.status_code)
+    r_g2 = guest.post('/admin/users/%d/revoke-all-sessions' % user_id,
+                      data={}, follow_redirects=False)
+    record('non-admin blocked from End All', r_g2.status_code in (301, 302),
+           'status=%s' % r_g2.status_code)
+
+    # CSRF: POST without token should be rejected (redirects to safe URL)
+    revoke_all_active(user_id)
+    r_setup = login_step_one(rb, email, TEST_PASSWORD)
+    tok5 = csrf_from(r_setup.get_data(as_text=True))
+    with rb.session_transaction() as sess:
+        otp_c5 = sess.get('otp_login_%s' % email, {}).get('otp')
+    rb.post('/login', data={'otp': otp_c5, 'csrf_token': tok5}, follow_redirects=False)
+    pre_sessions = UserSession.get_active_sessions_for_user(user_id)
+    pre_count = len(pre_sessions)
+    record('has active session before CSRF test', pre_count >= 1, 'count=%d' % pre_count)
+    if pre_count >= 1:
+        sid_csrf = pre_sessions[0]['id']
+        r_csrf = admin.post('/admin/users/%d/revoke-session/%d' % (user_id, sid_csrf),
+                            data={}, follow_redirects=False)
+        record('missing CSRF token rejected', r_csrf.status_code == 302 and
+               '/admin/user-security' not in r_csrf.headers.get('Location', ''))
+        # Session must still be active (not revoked by the unauthorised request)
+        row_csrf = UserSession.get_by_id(sid_csrf)
+        record('session NOT revoked without CSRF token',
+               row_csrf and row_csrf.get('status') == 'active',
+               'status=%s' % (row_csrf.get('status') if row_csrf else 'None'))
+
+    # Restore a fresh session for remaining tests
+    revoke_all_active(user_id)
+    r_login = login_step_one(rb, email, TEST_PASSWORD)
+    tok_login = csrf_from(r_login.get_data(as_text=True))
+    with rb.session_transaction() as sess:
+        otp_login = sess.get('otp_login_%s' % email, {}).get('otp')
+    rb.post('/login', data={'otp': otp_login, 'csrf_token': tok_login},
+            follow_redirects=False)
+
+    print()
+    print('=' * 70)
+    print('TEST 17: Admin-ended session shows specific message')
+    print('=' * 70)
+    # Admin ends the active session via the security page
+    sec_page = admin.get('/admin/user-security')
+    tok_admin = csrf_from(sec_page.get_data(as_text=True))
+    active_now = UserSession.get_active_sessions_for_user(user_id)
+    # Verify login created a session
+    record('login created active session for TEST 17',
+           len(active_now) >= 1, 'count=%d' % len(active_now))
+    if active_now:
+        sess_id_admin = active_now[0]['id']
+        r_end_admin = admin.post('/admin/users/%d/revoke-session/%d' % (user_id, sess_id_admin),
+                   data={'csrf_token': tok_admin}, follow_redirects=False)
+        record('admin End redirects (302)', r_end_admin.status_code == 302,
+               'status=%s' % r_end_admin.status_code)
+        row_check = UserSession.get_by_id(sess_id_admin)
+        record('session revoked in DB (TEST 17)',
+               row_check and row_check.get('status') == 'revoked',
+               'status=%s' % (row_check.get('status') if row_check else 'None'))
+        # Next request from the revoked browser should show admin-ended message
+        r_after = rb.get('/profile', follow_redirects=True)
+        body_after = r_after.get_data(as_text=True)
+        # Check for key terms (the message contains "ended by a StudyHub administrator")
+        found = ('ended by' in body_after.lower() and
+                 'administrator' in body_after.lower() and
+                 'sign in again' in body_after.lower())
+        record('admin-ended session shows specific message', found,
+               'found=%s' % found)
+
+    print()
+    print('=' * 70)
+    print('TEST 18: User self-deletion sends confirmation email')
+    print('=' * 70)
+    # Mock notification delivery to capture emails
+    from utils import notifications
+    sent_emails = []
+    original_send = notifications.send_template_notification
+    def mock_send_template(purpose, recipient_email, related_id=None, dedupe_key=None):
+        tmpl = notifications.TEMPLATES.get(purpose, {})
+        sent_emails.append((recipient_email, tmpl.get('subject', ''), tmpl.get('body', '')))
+        return notifications.NotificationService.RESULT_SENT
+    notifications.send_template_notification = mock_send_template
+    # Also clear pending_notifications to avoid dedup
+    with app.app_context():
+        conn = get_connection()
+        cursor = get_cursor(conn)
+        cursor.execute("DELETE FROM pending_notifications")
+        conn.commit()
+        close_cursor(cursor)
+        conn.close()
+
+    # Clean up previous sessions and log in fresh
+    revoke_all_active(user_id)
+    r_login = login_step_one(rb, email, TEST_PASSWORD)
+    tok_login = csrf_from(r_login.get_data(as_text=True))
+    with rb.session_transaction() as sess:
+        otp_login = sess.get('otp_login_%s' % email, {}).get('otp')
+    r_login_resp = rb.post('/login', data={'otp': otp_login, 'csrf_token': tok_login},
+            follow_redirects=False)
+    record('user logged in for deletion test', r_login_resp.status_code == 302,
+           'status=%s' % r_login_resp.status_code)
+
+    # Request deletion (needs fresh login + CSRF token)
+    page_prof = rb.get('/profile')
+    tok_del = csrf_from(page_prof.get_data(as_text=True))
+    rb.post('/profile/delete-account', data={'password': TEST_PASSWORD, 'csrf_token': tok_del},
+            follow_redirects=False)
+    # Get OTP from session (stored with purpose 'delete_account')
+    with rb.session_transaction() as sess:
+        otp_del = sess.get('otp_delete_account_%s' % email, {}).get('otp')
+    # Get fresh CSRF token from confirm-delete page
+    page_confirm = rb.get('/profile/confirm-delete-account')
+    tok_confirm = csrf_from(page_confirm.get_data(as_text=True))
+    # Confirm deletion
+    r_del = rb.post('/profile/confirm-delete-account',
+                    data={'otp': otp_del, 'csrf_token': tok_confirm},
+                    follow_redirects=False)
+    record('deletion redirects after success', r_del.status_code == 302,
+           'status=%s' % r_del.status_code)
+    record('deletion confirmation email sent', len(sent_emails) == 1,
+           'count=%d' % len(sent_emails))
+    if sent_emails:
+        record('email sent to correct address', sent_emails[0][0] == email)
+        record('email subject correct',
+               sent_emails[0][1] == 'Your StudyHub Account Has Been Deleted')
+        record('email body correct', 'successfully deleted' in sent_emails[0][2].lower())
+
+    # Restore: notification service + user record
+    notifications.send_template_notification = original_send
+    from models.user import User as UserModel
+    with app.app_context():
+        UserModel.update(user_id, is_active=1, deleted_by_user=0,
+                         deletion_requested_at=None, deletion_processed=None)
+        conn = get_connection()
+        cursor = get_cursor(conn)
+        cursor.execute("DELETE FROM pending_notifications")
+        conn.commit()
+        close_cursor(cursor)
+        conn.close()
+
+    print()
+    print('=' * 70)
+    print('TEST 19: Admin deletion sends notification email')
+    print('=' * 70)
+    sent_emails2 = []
+    original_send_email2 = OTPManager.send_email
+    def mock_send_email2(email_addr, subject, body):
+        sent_emails2.append((email_addr, subject, body))
+        return RESULT_SUCCESS
+    OTPManager.send_email = staticmethod(mock_send_email2)
+
+    # Admin deletes the user
+    r_admin_del = admin.post('/admin/users/delete/%d' % user_id,
+                             data={'csrf_token': csrf_from(admin.get('/admin/users').get_data(as_text=True))},
+                             follow_redirects=False)
+    record('admin deletion redirects (302)', r_admin_del.status_code == 302,
+           'status=%s' % r_admin_del.status_code)
+    record('admin deletion email sent', len(sent_emails2) >= 1,
+           'count=%d' % len(sent_emails2))
+    if sent_emails2:
+        record('admin email sent to correct address', sent_emails2[0][0] == email)
+        record('admin email subject correct',
+               sent_emails2[0][1] == 'Your StudyHub Account Was Deleted by an Administrator')
+        record('admin email body correct',
+               'administrator' in sent_emails2[0][2].lower())
+
+    # Restore email service
+    OTPManager.send_email = original_send_email2
+
+    # Restore user again for cleanup
+    with app.app_context():
+        UserModel.update(user_id, is_active=1, deleted_by_user=0,
+                         deletion_requested_at=None, deletion_processed=None)
 
 
     print()

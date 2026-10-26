@@ -17,7 +17,7 @@ StudyHub is a college study material management platform designed to help studen
 
 ### 2. Student Features (Registered Users)
 - Register and create account
-- Login with OTP verification (email or development OTP without SMTP)
+- Login with OTP verification (email-based, SMTP required)
 - Logout
 - Single active session with multi-device conflict detection
 - View unlimited materials

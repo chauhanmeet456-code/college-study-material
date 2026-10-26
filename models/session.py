@@ -178,14 +178,20 @@ class UserSession:
         close_cursor(cursor)
 
     @staticmethod
-    def revoke(conn, session_id, reason, when=None):
-        """Mark a session revoked and record why."""
+    def revoke(conn, session_id, reason, when=None, ended_by_admin=False):
+        """Mark a session revoked and record why.
+
+        When ``ended_by_admin`` is True the ``ended_by_admin`` column is set to 1
+        so the session layer can distinguish an administrator revocation from an
+        ordinary self-revocation.
+        """
         when = when or datetime.now()
         cursor = get_cursor(conn)
+        ended_by_admin_val = 1 if ended_by_admin else 0
         cursor.execute(
             "UPDATE user_sessions SET status = 'revoked', revoked_at = ?, "
-            "termination_reason = ? WHERE id = ?",
-            (when, reason, session_id),
+            "termination_reason = ?, ended_by_admin = ? WHERE id = ?",
+            (when, reason, ended_by_admin_val, session_id),
         )
         close_cursor(cursor)
 
@@ -216,14 +222,22 @@ class UserSession:
         close_cursor(cursor)
 
     @staticmethod
-    def revoke_all_for_user(conn, user_id, reason, exclude_id=None, when=None):
-        """Revoke every active session for a user, optionally keeping one."""
+    def revoke_all_for_user(conn, user_id, reason, exclude_id=None, when=None,
+                            ended_by_admin=False):
+        """Revoke every active session for a user, optionally keeping one.
+
+        When ``ended_by_admin`` is True the ``ended_by_admin`` column is set to 1
+        so the session layer can distinguish an administrator revocation from an
+        ordinary self-revocation.
+        """
         when = when or datetime.now()
+        ended_by_admin_val = 1 if ended_by_admin else 0
         query = (
             "UPDATE user_sessions SET status = 'revoked', revoked_at = ?, "
-            "termination_reason = ? WHERE user_id = ? AND status = 'active'"
+            "termination_reason = ?, ended_by_admin = ? WHERE user_id = ? "
+            "AND status = 'active'"
         )
-        params = [when, reason, user_id]
+        params = [when, reason, ended_by_admin_val, user_id]
         if exclude_id is not None:
             query += " AND id != ?"
             params.append(exclude_id)

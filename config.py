@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
 
 class Config:
     SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key')
@@ -28,6 +28,8 @@ class Config:
     # Socket timeout for the SMTP conversation. Without one, an unreachable or
     # unresponsive mail server can block a login request indefinitely.
     MAIL_TIMEOUT = int(os.getenv('MAIL_TIMEOUT', '10'))
+    MAIL_CONNECT_TIMEOUT = int(os.getenv('MAIL_CONNECT_TIMEOUT', '3'))
+    MAIL_SEND_TIMEOUT = int(os.getenv('MAIL_SEND_TIMEOUT', '8'))
     MAIL_USE_TLS = True
     APP_NAME = os.getenv('APP_NAME', 'StudyHub')
     DEBUG = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
@@ -47,4 +49,10 @@ class Config:
     # Only enable behind a trusted reverse proxy; clients can otherwise forge
     # X-Forwarded-For and evade the login rate limit.
     TRUST_PROXY_HEADERS = os.getenv('TRUST_PROXY_HEADERS', 'false').lower() == 'true'
+
+    # OTP configuration
+    OTP_EXPIRY_SECONDS = int(os.getenv('OTP_EXPIRY_SECONDS', '300'))
+    OTP_MAX_RESENDS = int(os.getenv('OTP_MAX_RESENDS', '3'))
+    OTP_RESEND_COOLDOWN_SECONDS = int(os.getenv('OTP_RESEND_COOLDOWN_SECONDS', '30'))
+    OTP_MAX_VERIFICATION_ATTEMPTS = int(os.getenv('OTP_MAX_VERIFICATION_ATTEMPTS', '5'))
 

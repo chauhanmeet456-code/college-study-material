@@ -129,21 +129,44 @@ def confirm_delete_account():
     if not email:
         flash('Please request account deletion first.', 'warning')
         return redirect(url_for('user.profile'))
-    
+
     if request.method == 'POST':
         otp = request.form.get('otp', '').strip()
-        
+
         if not otp:
             flash('Please enter the OTP.', 'danger')
             return redirect(url_for('user.confirm_delete_account'))
-        
+
         if OTPManager.verify_otp(email, otp, 'delete_account'):
             user = User.get_by_email(email)
             if user:
                 user_id = user['id']
                 session.clear()
-                User.delete(user_id)
-                flash('Your account has been deleted successfully.', 'success')
+                deleted = User.delete(user_id)
+                # Send confirmation email only after the deletion is committed.
+                email_sent = False
+                if deleted:
+                    try:
+                        from utils.notifications import send_template_notification
+                        result = send_template_notification(
+                            'account_deleted_self',
+                            user['email'],
+                            related_id=user_id,
+                            dedupe_key='account_deleted_self:%d' % user_id,
+                        )
+                        email_sent = result != 'not_configured' and result != 'queued'
+                    except Exception:
+                        pass
+                if not email_sent:
+                    flash(
+                        'Your account has been deleted successfully. '
+                        'However, we could not send the confirmation email to '
+                        + user['email'] + '. '
+                        'If you did not receive it, please contact support.',
+                        'warning',
+                    )
+                else:
+                    flash('Your account has been deleted successfully.', 'success')
                 return redirect(url_for('main.index'))
             else:
                 flash('User not found.', 'danger')
@@ -152,7 +175,7 @@ def confirm_delete_account():
         else:
             flash('Invalid or expired OTP.', 'danger')
             return redirect(url_for('user.confirm_delete_account'))
-    
+
     return render_template('user/confirm_delete_account.html', current_user=get_current_user(), email=email)
 
 

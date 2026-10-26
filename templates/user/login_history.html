@@ -144,8 +144,7 @@
                                     <form method="POST"
                                           action="{{ url_for('user.revoke_session', session_id=s.get('id')) }}"
                                           class="align-self-start">
-                {{ csrf_input() }}
-                                        {{ csrf_input() }}
+                                  {{ csrf_input() }}
                                         <button type="submit" class="btn btn-outline-danger btn-sm"
                                                 onclick="return confirm('End this session? The device will be signed out.')">
                                             <i class="fas fa-power-off me-1"></i>End
@@ -158,8 +157,7 @@
 
                         {% if active_sessions|length > 1 %}
                         <form method="POST" action="{{ url_for('user.revoke_all_sessions') }}">
-                {{ csrf_input() }}
-                            {{ csrf_input() }}
+                        {{ csrf_input() }}
                             <button type="submit" class="btn btn-danger btn-sm w-100"
                                     onclick="return confirm('End all other sessions? You will stay signed in here.')">
                                 <i class="fas fa-power-off me-1"></i>End all other sessions

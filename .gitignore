@@ -10,3 +10,4 @@ static/uploads/*
 Thumbs.db
 *.sqlite3
 *.db
+.pytest_cache/

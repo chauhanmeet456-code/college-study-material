@@ -154,19 +154,17 @@ block content %}
                   action="{{ url_for('admin.revoke_user_session', user_id=user.id, session_id=s.id) }}"
                   onsubmit="return confirm('End this session? The user will be signed out on that device.');">
                 {{ csrf_input() }}
-              {{ csrf_input() }}
-              <button type="submit" class="btn btn-outline-danger btn-sm">
+            <button type="submit" class="btn btn-outline-danger btn-sm">
                 <i class="fas fa-power-off me-1"></i>End
-              </button>
-            </form>
-          </div>
-        </div>
-        {% endfor %}
-        <form method="POST" action="{{ url_for('admin.revoke_all_user_sessions', user_id=user.id) }}"
-              onsubmit="return confirm('End all active sessions for this user?');">
-                {{ csrf_input() }}
-          {{ csrf_input() }}
-          <button type="submit" class="btn btn-danger btn-sm w-100">
+            </button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+    <form method="POST" action="{{ url_for('admin.revoke_all_user_sessions', user_id=user.id) }}"
+            onsubmit="return confirm('End all active sessions for this user?');">
+        {{ csrf_input() }}
+        <button type="submit" class="btn btn-danger btn-sm w-100">
             <i class="fas fa-power-off me-1"></i>End all sessions for this user
           </button>
         </form>

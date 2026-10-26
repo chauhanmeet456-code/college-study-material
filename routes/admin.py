@@ -90,18 +90,20 @@ def dashboard():
         from utils.database import get_connection, get_cursor, close_cursor
         conn = get_connection()
         cursor = get_cursor(conn)
-        cursor.execute("SELECT COUNT(*) as total FROM users WHERE is_active = 1")
-        total_students = cursor.fetchone()['total']
-        cursor.execute("SELECT COUNT(*) as total FROM subjects WHERE is_active = 1")
-        total_subjects = cursor.fetchone()['total']
-        cursor.execute("SELECT COUNT(*) as total FROM materials WHERE is_active = 1")
-        total_materials = cursor.fetchone()['total']
-        cursor.execute("SELECT SUM(download_count) as total FROM materials")
+        cursor.execute("""
+            SELECT
+                (SELECT COUNT(*) FROM users WHERE is_active = 1) as total_students,
+                (SELECT COUNT(*) FROM subjects WHERE is_active = 1) as total_subjects,
+                (SELECT COUNT(*) FROM materials WHERE is_active = 1) as total_materials,
+                (SELECT COALESCE(SUM(download_count), 0) FROM materials) as total_downloads,
+                (SELECT COALESCE(SUM(view_count), 0) FROM materials) as total_views
+        """)
         row = cursor.fetchone()
-        total_downloads = row['total'] if row and row['total'] else 0
-        cursor.execute("SELECT SUM(view_count) as total FROM materials")
-        row = cursor.fetchone()
-        total_views = row['total'] if row and row['total'] else 0
+        total_students = row['total_students']
+        total_subjects = row['total_subjects']
+        total_materials = row['total_materials']
+        total_downloads = row['total_downloads']
+        total_views = row['total_views']
         close_cursor(cursor)
         conn.close()
     except Exception as e:
@@ -409,6 +411,16 @@ def deleted_users_list():
     return render_template('admin/deleted_users.html', users=users, total=total, page=page,
                            search=search, admin=get_current_admin(), end=end)
 
+@admin_bp.route('/users/never-logged-in')
+@admin_required
+def never_logged_in_users():
+    search = request.args.get('search', '')
+    status = request.args.get('status', 'all')
+    page = int(request.args.get('page', 1))
+    users, total = User.get_never_logged_in_users(search=search, status=status, page=page, per_page=10)
+    return render_template('admin/never_logged_in.html', users=users, total=total, page=page,
+                           search=search, status=status, admin=get_current_admin())
+
 @admin_bp.route('/users/<int:user_id>')
 @admin_required
 def view_user(user_id):
@@ -447,13 +459,29 @@ def delete_user(user_id):
     if not user:
         flash('User not found.', 'danger')
         return redirect(next_url)
+    user_email = user.get('email') or ''
+    deleted = False
     if user.get('deleted_by_user') == 1 and user.get('deletion_processed') is not None:
-        User.permanent_delete(user_id)
-        flash('User permanently deleted from database.', 'success')
+        deleted = User.permanent_delete(user_id)
+        if deleted:
+            flash('User permanently deleted from database.', 'success')
     else:
         User.mark_deletion_processed(user_id)
-        User.delete(user_id)
-        flash('User deletion processed successfully!', 'success')
+        deleted = User.delete(user_id)
+        if deleted:
+            flash('User deletion processed successfully!', 'success')
+    # Send notification email only after successful deletion.
+    if deleted and user_email:
+        try:
+            from utils.notifications import send_template_notification
+            send_template_notification(
+                'account_deleted_by_admin',
+                user_email,
+                related_id=user_id,
+                dedupe_key='account_deleted_by_admin:%d' % user_id,
+            )
+        except Exception:
+            pass
     return redirect(next_url)
 
 @admin_bp.route('/messages')
@@ -731,8 +759,8 @@ def revoke_user_session(user_id, session_id):
 
     row = UserSession.get_by_id(session_id)
     if not row or row.get('user_id') != user_id:
-        flash('Session not found.', 'danger')
-        return redirect(url_for('admin.user_login_history', user_id=user_id))
+        flash('Session not found or does not belong to this user.', 'danger')
+        return redirect(url_for('admin.user_security'))
 
     try:
         admin = get_current_admin()
@@ -743,27 +771,45 @@ def revoke_user_session(user_id, session_id):
                 conn, session_id,
                 'Session revoked by administrator (%s)' % (admin.get('name') if admin else 'unknown'),
                 now,
+                ended_by_admin=True,
             )
-            LoginHistory.create(
-                conn, user_id, LoginHistory.EVENT_ADMIN_REVOKED,
-                device_description=row.get('device_name'),
-                ip_address=ip,
-                result=LoginHistory.RESULT_INFO,
-                related_session_id=session_id,
-            )
-            AdminAuditLog.log(
-                conn,
-                admin['id'] if admin else None,
-                'revoke_user_session',
-                'user_session', session_id,
-                'Ended session for user %s (%s)' % (user.get('name'), user.get('id')),
-                ip,
-            )
+            try:
+                LoginHistory.create(
+                    conn, user_id, LoginHistory.EVENT_ADMIN_REVOKED,
+                    device_description=row.get('device_name'),
+                    ip_address=ip,
+                    result=LoginHistory.RESULT_INFO,
+                    related_session_id=session_id,
+                )
+            except Exception:
+                pass
+            try:
+                AdminAuditLog.log(
+                    conn,
+                    admin['id'] if admin else None,
+                    'revoke_user_session',
+                    'user_session', session_id,
+                    'Ended session for user %s (%s)' % (user.get('name'), user.get('id')),
+                    ip,
+                )
+            except Exception:
+                pass
+        revoked = True
         flash('Session ended and the change was audited.', 'success')
     except Exception:
+        revoked = False
         flash('Could not end that session. Please try again.', 'danger')
 
-    return redirect(url_for('admin.user_login_history', user_id=user_id))
+    if revoked and user.get('email'):
+        from utils.notifications import send_template_notification
+        send_template_notification(
+            'session_terminated',
+            user['email'],
+            related_id=session_id,
+            dedupe_key='session_terminated:%d' % session_id,
+        )
+
+    return redirect(url_for('admin.user_security'))
 
 
 @admin_bp.route('/users/<int:user_id>/revoke-all-sessions', methods=['POST'])
@@ -784,25 +830,43 @@ def revoke_all_user_sessions(user_id):
                 conn, user_id,
                 'All sessions revoked by administrator (%s)' % (admin.get('name') if admin else 'unknown'),
                 when=now,
+                ended_by_admin=True,
             )
-            LoginHistory.create(
-                conn, user_id, LoginHistory.EVENT_ADMIN_REVOKED,
-                ip_address=ip, result=LoginHistory.RESULT_INFO,
-                failure_reason='All sessions revoked by administrator',
-            )
-            AdminAuditLog.log(
-                conn,
-                admin['id'] if admin else None,
-                'revoke_all_user_sessions',
-                'user', user_id,
-                'Ended all sessions for user %s (%s)' % (user.get('name'), user.get('id')),
-                ip,
-            )
+            try:
+                LoginHistory.create(
+                    conn, user_id, LoginHistory.EVENT_ADMIN_REVOKED,
+                    ip_address=ip, result=LoginHistory.RESULT_INFO,
+                    failure_reason='All sessions revoked by administrator',
+                )
+            except Exception:
+                pass
+            try:
+                AdminAuditLog.log(
+                    conn,
+                    admin['id'] if admin else None,
+                    'revoke_all_user_sessions',
+                    'user', user_id,
+                    'Ended all sessions for user %s (%s)' % (user.get('name'), user.get('id')),
+                    ip,
+                )
+            except Exception:
+                pass
+        revoked = True
         flash('%d session(s) ended and the change was audited.' % changed, 'success')
     except Exception:
+        revoked = False
         flash('Could not end the sessions. Please try again.', 'danger')
 
-    return redirect(url_for('admin.user_login_history', user_id=user_id))
+    if revoked and user.get('email'):
+        from utils.notifications import send_template_notification
+        send_template_notification(
+            'session_terminated',
+            user['email'],
+            related_id=user_id,
+            dedupe_key='session_terminated_all:%d' % user_id,
+        )
+
+    return redirect(url_for('admin.user_security'))
 
 
 @admin_bp.route('/user-security/audit-log')
