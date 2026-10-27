@@ -250,9 +250,10 @@ def get_connection():
         return PooledConnection(conn, _pg_pool)
     if Config.USE_SQLITE:
         os.makedirs(os.path.dirname(Config.SQLITE_DB), exist_ok=True)
-        conn = sqlite3.connect(Config.SQLITE_DB)
+        conn = sqlite3.connect(Config.SQLITE_DB, timeout=30)
         conn.row_factory = dict_factory
         conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 30000")
         return conn
     conn = pymysql.connect(
         host=Config.MYSQL_HOST,

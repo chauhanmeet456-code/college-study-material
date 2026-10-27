@@ -286,7 +286,6 @@ def test_auth_failure_no_retry(mock_smtp):
         )
 
     assert result.is_failure
-    assert result.is_failure
     assert mock_smtp.instance_count == 1  # no retry
 
 
@@ -300,6 +299,31 @@ def test_all_retries_exhausted_returns_failure(mock_smtp):
 
     assert result.is_failure
     assert mock_smtp.instance_count == OTPManager.MAX_SEND_ATTEMPTS
+
+
+def test_quit_exception_does_not_propagate():
+    """An exception in the finally-block quit() must not escape _attempt_send."""
+    class QuittingSMTP(FakeSMTP):
+        def quit(self):
+            raise smtplib.SMTPServerDisconnected('Server gone during quit')
+
+    with app.app_context():
+        with patch('smtplib.SMTP', QuittingSMTP):
+            result = OTPManager.send_email(
+                'user@example.com', 'Test', '<p>Body</p>',
+            )
+        assert result.is_success  # should still return a valid result
+
+
+def test_send_email_catches_any_exception_from_attempt_send():
+    """send_email must return RESULT_FAILURE if _attempt_send raises."""
+    with app.app_context():
+        with patch.object(OTPManager, '_attempt_send',
+                          side_effect=RuntimeError('unexpected')):
+            result = OTPManager.send_email(
+                'user@example.com', 'Test', '<p>Body</p>',
+            )
+        assert result.is_failure
 
 
 # ---------------------------------------------------------------------------

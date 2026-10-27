@@ -283,7 +283,7 @@ def main():
 
     print()
     print('=' * 70)
-    print('TEST 8: Admin session revoke sets ended_by_admin and emails user')
+    print('TEST 8: Admin session revoke sets ended_by_admin, no email (popup)')
     print('=' * 70)
     sent_emails.clear()
     _clear_pending_notifications()
@@ -316,29 +316,11 @@ def main():
         record('termination_reason mentions administrator',
                row and 'administrator' in str(row.get('termination_reason', '')).lower())
 
-        record('session_terminated email sent', len(sent_emails) >= 1,
+        # Individual session revocation no longer sends an email — the
+        # affected user is notified in-browser via the session-status
+        # polling popup instead.
+        record('no email sent for individual revocation', len(sent_emails) == 0,
                'count=%d' % len(sent_emails))
-        if sent_emails:
-            record('email to correct user', sent_emails[0][0] == email)
-            record('email subject is session_terminated',
-                   sent_emails[0][1] == TEMPLATES['session_terminated']['subject'])
-
-        # Verify notification persisted with correct dedupe key
-        from utils.database import get_connection as _gc, get_cursor as _gcur, close_cursor as _cc
-        conn = _gc()
-        cur = _gcur(conn)
-        cur.execute(
-            "SELECT * FROM pending_notifications WHERE dedupe_key = ? "
-            "ORDER BY id DESC LIMIT 1",
-            ('session_terminated:%d' % sid,),
-        )
-        notif_row = cur.fetchone()
-        _cc(cur)
-        conn.close()
-        record('notification persisted with correct dedupe key',
-               notif_row is not None)
-        record('persisted notification has status sent',
-               notif_row and notif_row.get('status') == 'sent')
 
     print()
     print('=' * 70)

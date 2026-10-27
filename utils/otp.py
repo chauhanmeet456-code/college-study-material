@@ -330,6 +330,15 @@ class OTPManager:
                     # Calling quit() on an already-disconnected socket can
                     # trigger an additional timeout that adds to the delay.
                     if not data_sent:
+                        # Use a short timeout for the QUIT handshake so that
+                        # a dead socket doesn't cause a multi-second hang.
+                        if hasattr(server, 'sock') and server.sock:
+                            try:
+                                server.sock.settimeout(
+                                    getattr(Config, 'MAIL_QUIT_TIMEOUT', 2)
+                                )
+                            except (AttributeError, OSError):
+                                pass
                         server.quit()
                 except Exception:
                     pass
@@ -362,9 +371,23 @@ class OTPManager:
         retry_delay = OTPManager.RETRY_DELAY_SECONDS
 
         for attempt in range(1, max_attempts + 1):
-            result, can_retry, phase = OTPManager._attempt_send(
-                to_email, subject, body,
-            )
+            try:
+                result, can_retry, phase = OTPManager._attempt_send(
+                    to_email, subject, body,
+                )
+            except Exception as exc:
+                # Safety net: _attempt_send has its own exception handling for
+                # known SMTP errors, but if an unexpected exception escapes
+                # (e.g. from the finally block's quit()), treat it as a
+                # transient failure and retry rather than crashing.
+                smtp_logger.warning(
+                    'Unexpected exception in _attempt_send: %s',
+                    type(exc).__name__,
+                )
+                if attempt >= max_attempts:
+                    return RESULT_FAILURE
+                time.sleep(retry_delay)
+                continue
 
             if result.is_success or not can_retry or attempt >= max_attempts:
                 return result

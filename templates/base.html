@@ -504,5 +504,94 @@
         });
     </script>
     {% block extra_js %}{% endblock %}
+
+    {# Session-revocation popup: shows a modal to a user whose session was
+       ended by an administrator.  Only rendered for authenticated regular
+       users (not admins, not anonymous visitors). #}
+    {% if current_user %}
+    <div class="modal fade" id="sessionRevokedModal" tabindex="-1" aria-labelledby="sessionRevokedModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="sessionRevokedModalLabel">
+                        <i class="fas fa-user-lock me-2"></i>Session Ended
+                    </h5>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-0">Admin has ended your session. Please log in again.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" id="sessionRevokedAck">
+                        OK
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        var SESSION_POLL_INTERVAL = 5000;  // 5 seconds
+        var pollTimer = null;
+        var modalEl = document.getElementById('sessionRevokedModal');
+        var ackBtn = document.getElementById('sessionRevokedAck');
+        var modal = null;
+        var alreadyShown = false;
+
+        if (modalEl) {
+            modal = new bootstrap.Modal(modalEl, { backdrop: 'static', keyboard: false });
+        }
+
+        function startPolling() {
+            if (pollTimer) { return; }
+            pollTimer = setInterval(checkSession, SESSION_POLL_INTERVAL);
+        }
+
+        function stopPolling() {
+            if (pollTimer) {
+                clearInterval(pollTimer);
+                pollTimer = null;
+            }
+        }
+
+        function checkSession() {
+            fetch('{{ url_for('user.session_status') }}', {
+                method: 'GET',
+                credentials: 'same-origin',
+                headers: { 'Accept': 'application/json' },
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!data.valid && data.reason === 'revoked_by_admin') {
+                    if (alreadyShown) { return; }
+                    alreadyShown = true;
+                    stopPolling();
+                    if (modal) {
+                        modal.show();
+                    }
+                }
+            })
+            .catch(function() {
+                /* network errors are not fatal — keep polling */
+            });
+        }
+
+        function acknowledgeAndLogout() {
+            stopPolling();
+            if (modal) { modal.hide(); }
+            window.location.href = '{{ url_for('auth.logout') }}';
+        }
+
+        if (ackBtn) {
+            ackBtn.addEventListener('click', acknowledgeAndLogout);
+        }
+
+        // Start polling after the page has finished loading.
+        document.addEventListener('DOMContentLoaded', function() {
+            startPolling();
+        });
+    })();
+    </script>
+    {% endif %}
 </body>
 </html>

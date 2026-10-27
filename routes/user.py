@@ -6,6 +6,7 @@ from flask import (
     request,
     session,
     url_for,
+    jsonify,
 )
 
 from config import Config
@@ -308,5 +309,62 @@ def revoke_all_sessions():
             flash('There were no other active sessions.', 'info')
     except Exception:
         flash('Could not end the other sessions. Please try again.', 'danger')
+
+    return redirect(url_for('user.login_history'))
+
+
+# ---------------------------------------------------------------------------
+# Session-status polling endpoint (used by the browser-side popup mechanism)
+# ---------------------------------------------------------------------------
+
+@user_bp.route('/account/session-status')
+def session_status():
+    """Return JSON describing whether the current browser session is still valid.
+
+    This endpoint is polled by client-side JavaScript (every few seconds) so
+    that a browser tab detects, in near-real-time, when an administrator has
+    revoked *this* user's session.  When that happens the frontend shows a
+    modal popup with the message:
+
+        "Admin has ended your session. Please log in again."
+
+    Only the affected user (the one whose ``session_token`` was revoked)
+    receives ``valid: false`` — every other browser either has a different
+    token or no token at all and is unaffected.
+
+    The check is server-side: it reads the signed Flask ``session_token``
+    cookie and looks the corresponding row up in ``user_sessions``.  This
+    satisfies the requirement not to rely solely on flash messages (the
+    session is already invalidated server-side *before* the redirect, so a
+    flash message may never be rendered).
+    """
+    token = session.get('session_token')
+    if not token:
+        # Not a logged-in user — nothing to poll.  Returning valid:true keeps
+        # the JS idle; returning false would cause an infinite redirect loop
+        # for anonymous visitors.
+        return jsonify({'valid': True, 'reason': 'no_session'})
+
+    row = UserSession.get_by_token_hash(hash_session_token(token))
+    if not row:
+        return jsonify({'valid': False, 'reason': 'missing'})
+
+    status = row.get('status')
+    if status == UserSession.STATUS_ACTIVE:
+        return jsonify({'valid': True, 'reason': 'active'})
+
+    if status == UserSession.STATUS_REVOKED:
+        ended_by_admin = row.get('ended_by_admin')
+        if ended_by_admin == 1 or ended_by_admin is True:
+            return jsonify({'valid': False, 'reason': 'revoked_by_admin'})
+        return jsonify({'valid': False, 'reason': 'revoked'})
+
+    if status == UserSession.STATUS_EXPIRED:
+        return jsonify({'valid': False, 'reason': 'expired'})
+
+    if status == UserSession.STATUS_LOGGED_OUT:
+        return jsonify({'valid': False, 'reason': 'logged_out'})
+
+    return jsonify({'valid': False, 'reason': status or 'unknown'})
 
     return redirect(url_for('user.login_history'))

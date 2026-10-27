@@ -48,6 +48,7 @@ SKIP_SESSION_CHECK_ENDPOINTS = {
     'user.login_history',
     'user.revoke_session',
     'user.revoke_all_sessions',
+    'user.session_status',
     'main.index',
 }
 
