@@ -1,6 +1,9 @@
+import logging
 import os
 import time
 from datetime import datetime, timedelta
+
+_session_logger = logging.getLogger('studyhub.session')
 
 from flask import (
     Flask,
@@ -130,9 +133,20 @@ def create_app():
         session_token = session.get('session_token')
 
         if not session_token:
+            # No token at all — nothing to validate.  This is the normal state
+            # for anonymous visitors and for the login flow itself.
+            _session_logger.debug(
+                '[SESSION_DIAG] no_token endpoint=%s', endpoint
+            )
             return None
 
         if endpoint in SKIP_SESSION_CHECK_ENDPOINTS:
+            # Login/logout/OTP/admin-auth endpoints are intentionally exempt:
+            # they may legitimately carry a stale token while establishing a
+            # fresh one.
+            _session_logger.debug(
+                '[SESSION_DIAG] skip_check endpoint=%s', endpoint
+            )
             return None
 
         row = _resolve_session(session_token)
@@ -145,6 +159,9 @@ def create_app():
             if session.get('session_id') != row.get('id'):
                 session['session_id'] = row.get('id')
             _touch_activity(row)
+            _session_logger.debug(
+                '[SESSION_DIAG] valid endpoint=%s status=active', endpoint
+            )
             return None
 
         # Either the row is gone, or its status marks it as finished.
@@ -157,6 +174,12 @@ def create_app():
         session.pop('session_id', None)
         session.pop('user_id', None)
         session.pop('user_name', None)
+
+        _session_logger.info(
+            '[SESSION_DIAG] invalid_session endpoint=%s prev_status=%s cleared=True '
+            'redirect=auth.login',
+            endpoint, previous_status,
+        )
 
         if previous_status == UserSession.STATUS_REVOKED:
             ended_by_admin = (session_row or {}).get('ended_by_admin') if session_row else None

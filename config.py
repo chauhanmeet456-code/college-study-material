@@ -14,7 +14,11 @@ class Config:
     USE_SQLITE = os.getenv('USE_SQLITE', 'false').lower() == 'true'
     SQLITE_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance', 'college_study.sqlite')
     DATABASE_URL = os.getenv('DATABASE_URL', None)
-    USE_POSTGRES = DATABASE_URL is not None and DATABASE_URL.strip() != ''
+    # USE_SQLITE=true explicitly selects the bundled SQLite database and
+    # takes priority over DATABASE_URL, so that a locally present SQLite
+    # database (with real user data) is never shadowed by a stale or empty
+    # PostgreSQL endpoint that may also be configured via DATABASE_URL.
+    USE_POSTGRES = (not USE_SQLITE) and DATABASE_URL is not None and DATABASE_URL.strip() != ''
     UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'uploads')
     MAX_CONTENT_LENGTH = 5 * 1024 * 1024 * 1024
     ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'ppt', 'pptx', 'zip', 'txt', 'mp4', 'webm', 'ogg', 'avi', 'mov', 'wmv', 'flv', 'mkv', 'png', 'jpg', 'jpeg', 'gif', 'webp'}

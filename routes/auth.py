@@ -10,6 +10,9 @@ from flask import (
     url_for,
 )
 
+import logging
+import re
+
 from config import Config
 from models.session import (
     FailedLoginAttempt,
@@ -29,6 +32,34 @@ from utils.security import (
     csrf_protect,
     register_login_failure,
 )
+
+logger = logging.getLogger('studyhub.auth')
+
+
+def _mask_email(email):
+    """Redact an email address for diagnostic logging."""
+    if not email:
+        return 'unknown'
+    parts = email.split('@')
+    if len(parts) == 2 and len(parts[0]) > 1:
+        return parts[0][0] + '***@' + parts[1]
+    return '***'
+
+
+def _log_auth(event, **kwargs):
+    """Emit a sanitized diagnostic log line for authentication events.
+
+    Never logs passwords, OTPs, session tokens, or cookie values.
+    Only records the event name, redirect destination, and outcomes.
+    """
+    safe = {}
+    for k, v in kwargs.items():
+        v = str(v)
+        if k in ('password', 'otp', 'csrf_token', 'session_token'):
+            v = '[REDACTED]'
+        safe[k] = v
+    detail = ' '.join(f'{k}={v}' for k, v in sorted(safe.items()))
+    logger.info('[LOGIN_DIAG] %s %s', event, detail)
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -215,6 +246,7 @@ def login():
 
         return _handle_credential_step()
 
+    _log_auth('login_page_rendered', method='GET')
     return render_template(
         'auth/login.html',
         current_user=get_current_user(),
@@ -229,12 +261,16 @@ def _handle_credential_step():
     password = request.form.get('password', '')
 
     if not email or not password:
+        _log_auth('credential_step_failed', reason='empty_fields',
+                  redirect_to='auth.login')
         flash('Please enter both email and password.', 'danger')
         return redirect(url_for('auth.login'))
 
     if check_login_rate_limit(LOGIN_RATE_SCOPE, email,
                               Config.LOGIN_RATE_LIMIT_ATTEMPTS,
                               Config.LOGIN_RATE_LIMIT_WINDOW):
+        _log_auth('credential_step_failed', reason='rate_limited',
+                  redirect_to='auth.login')
         _record_failed_login(None, email, 'rate_limited')
         retry_minutes = max(1, Config.LOGIN_RATE_LIMIT_WINDOW // 60)
         flash(
@@ -251,19 +287,27 @@ def _handle_credential_step():
     if not user:
         register_login_failure(LOGIN_RATE_SCOPE, email, Config.LOGIN_RATE_LIMIT_WINDOW)
         _record_failed_login(None, email, 'invalid_credentials')
+        _log_auth('credential_step_failed', reason='user_not_found',
+                  redirect_to='auth.login')
         flash('Invalid email or password.', 'danger')
         return redirect(url_for('auth.login'))
 
     if not User.verify_password(user, password):
         register_login_failure(LOGIN_RATE_SCOPE, email, Config.LOGIN_RATE_LIMIT_WINDOW)
         _record_failed_login(user['id'], email, 'invalid_credentials')
+        _log_auth('credential_step_failed', reason='password_mismatch',
+                  redirect_to='auth.login')
         flash('Invalid email or password.', 'danger')
         return redirect(url_for('auth.login'))
 
     if not user.get('is_active', 1):
         _record_failed_login(user['id'], email, 'account_inactive')
+        _log_auth('credential_step_failed', reason='account_inactive',
+                  redirect_to='auth.login')
         flash('Your account is deactivated. Please contact support.', 'warning')
         return redirect(url_for('auth.login'))
+
+    _log_auth('credential_step_passed', user_id=user['id'])
 
     # Credentials are correct but the user is not authenticated yet: the OTP
     # step, and any multi-device confirmation, still have to succeed.
@@ -274,8 +318,9 @@ def _handle_credential_step():
     if OTPManager.is_otp_valid(email, 'login'):
         session[PENDING_LOGIN_EMAIL] = email
         session.permanent = True
+        _log_auth('otp_already_pending', email=_mask_email(email))
         flash('A verification code has already been sent. Please check your email.',
-              'info')
+            'info')
         return render_template(
             'auth/login.html',
             current_user=get_current_user(),
@@ -288,6 +333,8 @@ def _handle_credential_step():
     session.permanent = True
 
     if not OTPManager.is_configured():
+        _log_auth('otp_delivery_skipped', reason='smtp_not_configured',
+                  redirect_to='auth.login')
         flash("We couldn't send the verification code. Please try again later.", 'danger')
         _clear_login_state()
         _clear_pending_otp(email, 'login')
@@ -303,8 +350,9 @@ def _handle_credential_step():
 
     result = OTPManager.send_otp_email(email, otp_code, 'login')
     if result.is_success:
+        _log_auth('otp_sent', email=_mask_email(email))
         flash('Verification code sent to your email address. Please verify to complete login.',
-              'success')
+            'success')
         return render_template(
             'auth/login.html',
             current_user=get_current_user(),
@@ -313,6 +361,7 @@ def _handle_credential_step():
             remaining_attempts=Config.OTP_MAX_VERIFICATION_ATTEMPTS,
         )
     if result.is_ambiguous:
+        _log_auth('otp_send_ambiguous', email=_mask_email(email))
         # The SMTP server accepted the message data but disconnected before
         # confirming with a 250 reply.  The email may have been delivered —
         # keep the pending OTP state and show the verification screen so the
@@ -332,6 +381,8 @@ def _handle_credential_step():
             delivery_ambiguous=True,
         )
     # Definitive delivery failure
+    _log_auth('otp_delivery_failed', email=_mask_email(email),
+              redirect_to='auth.login')
     flash("We couldn't send the verification code. Please try again later.", 'danger')
     _clear_login_state()
     _clear_pending_otp(email, 'login')
@@ -348,11 +399,15 @@ def _handle_otp_step(otp):
     email = session.get(PENDING_LOGIN_EMAIL)
 
     if not email:
+        _log_auth('otp_step_failed', reason='no_pending_email',
+                  redirect_to='auth.login')
         flash('Session expired. Please login again.', 'warning')
         return redirect(url_for('auth.login'))
 
     if not OTPManager.verify_otp(email, otp, 'login'):
         remaining = _otp_remaining_attempts(email)
+        _log_auth('otp_step_failed', reason='otp_invalid',
+                  redirect_to='auth.login (render)')
         flash('Invalid or expired OTP.', 'danger')
         return render_template(
             'auth/login.html',
@@ -365,8 +420,12 @@ def _handle_otp_step(otp):
     user = User.get_by_email(email)
     if not user or not user.get('is_active', 1):
         _clear_login_state()
+        _log_auth('otp_step_failed', reason='account_inactive',
+                  redirect_to='auth.login')
         flash('Your account is deactivated. Please contact support.', 'warning')
         return redirect(url_for('auth.login'))
+
+    _log_auth('otp_verified', user_id=user['id'])
 
     # The account is now proven, but not yet authenticated in a new session.
     session[LOGIN_VERIFIED_USER] = user['id']
@@ -477,6 +536,8 @@ def _complete_login(user):
                 related_session_id=session_row_id,
             )
     except Exception:
+        _log_auth('login_completion_failed', user_id=user['id'],
+                  reason='exception', redirect_to='auth.login')
         flash('Something went wrong while signing you in. Please try again.', 'danger')
         _clear_login_state()
         return redirect(url_for('auth.login'))
@@ -496,6 +557,7 @@ def _complete_login(user):
     except Exception:
         pass
 
+    _log_auth('login_success', user_id=user['id'], redirect_to='main.index')
     flash('Login successful!', 'success')
     return redirect(url_for('main.index'))
 

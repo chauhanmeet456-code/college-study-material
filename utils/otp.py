@@ -59,6 +59,19 @@ RESULT_AMBIGUOUS = EmailDeliveryResult(EmailDeliveryResult.AMBIGUOUS)
 
 
 class OTPManager:
+    # Bounded retry configuration for transient SMTP failures (timeouts,
+    # connection resets, server disconnects during connect/login).
+    MAX_SEND_ATTEMPTS = 3
+    RETRY_DELAY_SECONDS = 2
+
+    @staticmethod
+    def _mask_email_log(email):
+        """Mask an email address for logging — never expose the full address."""
+        if not email or '@' not in email:
+            return '(unknown)'
+        local, _, domain = email.partition('@')
+        masked = (local[:1] + '***') if local else '***'
+        return f'{masked}@{domain}'
     @staticmethod
     def generate_otp():
         return str(secrets.randbelow(900000) + 100000)
@@ -174,35 +187,28 @@ class OTPManager:
         return max(0, Config.OTP_MAX_RESENDS - stored.get('resend_count', 0))
 
     @staticmethod
-    def send_email(to_email, subject, body):
-        """Send an email via SMTP and return an ``EmailDeliveryResult``.
+    def _attempt_send(to_email, subject, body):
+        """Perform a single SMTP connection + send attempt.
 
-        * **SUCCESS** – the SMTP server accepted the message (``250`` reply).
-        * **AMBIGUOUS** – the server accepted the ``DATA`` payload or went
-          silent while the client was sending it (``SMTPServerDisconnected``
-          raised *during* ``send_message``).  The message was transmitted to
-          the server and may have been delivered.
-        * **FAILURE** – anything else (connection refused, TLS error,
-          authentication failure, server disconnect before ``DATA``).
-
-        Returning ``EmailDeliveryResult`` (instead of ``bool``) lets callers
-        distinguish the ambiguous case and avoid clearing a pending OTP or
-        incrementing a resend counter when the email may already have been
-        sent.
+        Returns ``(result, can_retry, phase)`` where *can_retry* is True when
+        the failure was transient and a second attempt is meaningful (i.e. the
+        disconnect happened before the message payload was sent).
         """
         import socket as _socket
+
         start = time.time()
         server = None
         phase = 'init'
         data_sent = False
 
-        try:
-            msg = MIMEMultipart()
-            msg['From'] = Config.MAIL_USERNAME
-            msg['To'] = to_email
-            msg['Subject'] = subject
-            msg.attach(MIMEText(body, 'html'))
+        # Build the MIME message outside the retry loop — it is safe to reuse.
+        msg = MIMEMultipart()
+        msg['From'] = Config.MAIL_USERNAME
+        msg['To'] = to_email
+        msg['Subject'] = subject
+        msg.attach(MIMEText(body, 'html'))
 
+        try:
             context = ssl.create_default_context()
             connect_timeout = getattr(Config, 'MAIL_CONNECT_TIMEOUT', 5)
             old_default = _socket.getdefaulttimeout()
@@ -244,7 +250,7 @@ class OTPManager:
 
             elapsed = time.time() - start
             print(f'[TIMING] Email sent in {elapsed:.3f}s', flush=True)
-            return RESULT_SUCCESS
+            return RESULT_SUCCESS, False, phase
         except smtplib.SMTPServerDisconnected as e:
             elapsed = time.time() - start
             if data_sent:
@@ -252,7 +258,7 @@ class OTPManager:
                 # quit() or afterwards — the email was sent.
                 print(f'[TIMING] Email sent but server disconnected after {elapsed:.3f}s',
                       flush=True)
-                return RESULT_SUCCESS
+                return RESULT_SUCCESS, False, phase
             if phase == 'send':
                 # The server may have accepted the message data before
                 # disconnecting.  This is common with Gmail and some other
@@ -261,17 +267,62 @@ class OTPManager:
                 print(f'[TIMING] Email send interrupted after {elapsed:.3f}s: '
                       f'SMTPServerDisconnected (ambiguous — message data likely sent)',
                       flush=True)
-                return RESULT_AMBIGUOUS
-            # Disconnect during connect / starttls / login — definitive failure
+                # Do NOT retry — the message may already have been sent,
+                # retrying risks duplicate delivery.
+                return RESULT_AMBIGUOUS, False, phase
+            # Disconnect during connect / starttls / login — transient
             print(f'[TIMING] Email failed after {elapsed:.3f}s: '
                   f'SMTPServerDisconnected (pre-send, phase={phase})',
                   flush=True)
-            return RESULT_FAILURE
+            return RESULT_FAILURE, True, phase
+        except smtplib.SMTPAuthenticationError:
+            elapsed = time.time() - start
+            # Authentication failure is permanent — never retry.
+            print(f'[TIMING] SMTP authentication failed after {elapsed:.3f}s',
+                  flush=True)
+            return RESULT_FAILURE, False, phase
+        except (TimeoutError, ConnectionError) as e:
+            elapsed = time.time() - start
+            if phase == 'send':
+                # Timeout during message send is ambiguous — data may have been
+                # transmitted.  Do not retry to avoid duplicates.
+                print(f'[TIMING] Email send interrupted after {elapsed:.3f}s: '
+                      f'Timeout (ambiguous — message data may have been sent)',
+                      flush=True)
+                return RESULT_AMBIGUOUS, False, phase
+            # Timeout or connection error during connect/starttls/login — retry
+            print(f'[TIMING] Email failed after {elapsed:.3f}s: '
+                  f'{type(e).__name__} (phase={phase})',
+                  flush=True)
+            return RESULT_FAILURE, True, phase
+        except OSError as e:
+            # Catch-all OSError (socket-level) that is not TimeoutError or
+            # ConnectionError — e.g. network unreachable.  These are typically
+            # transient during connect/login.
+            elapsed = time.time() - start
+            if phase == 'send':
+                # OSError during send is ambiguous — data may have been sent.
+                print(f'[TIMING] Email send interrupted after {elapsed:.3f}s: '
+                      f'OSError (ambiguous — message data may have been sent)',
+                      flush=True)
+                return RESULT_AMBIGUOUS, False, phase
+            print(f'[TIMING] Email failed after {elapsed:.3f}s: '
+                  f'{type(e).__name__} (phase={phase})',
+                  flush=True)
+            return RESULT_FAILURE, True, phase
         except Exception as e:
             elapsed = time.time() - start
+            if data_sent:
+                return RESULT_SUCCESS, False, phase
+            if phase == 'send':
+                # Unknown error during send — treat as ambiguous, do not retry.
+                print(f'[TIMING] Email send interrupted after {elapsed:.3f}s: '
+                      f'{type(e).__name__} (ambiguous)',
+                      flush=True)
+                return RESULT_AMBIGUOUS, False, phase
             print(f'[TIMING] Email failed after {elapsed:.3f}s: {type(e).__name__}',
                   flush=True)
-            return RESULT_FAILURE
+            return RESULT_FAILURE, True, phase
         finally:
             if server:
                 try:
@@ -282,6 +333,51 @@ class OTPManager:
                         server.quit()
                 except Exception:
                     pass
+
+    @staticmethod
+    def send_email(to_email, subject, body):
+        """Send an email via SMTP and return an ``EmailDeliveryResult``.
+
+        * **SUCCESS** – the SMTP server accepted the message (``250`` reply).
+        * **AMBIGUOUS** – the server accepted the ``DATA`` payload or went
+          silent while the client was sending it (``SMTPServerDisconnected``
+          or timeout raised *during* ``send_message``).  The message was
+          transmitted to the server and may have been delivered.
+        * **FAILURE** – anything else (connection refused, TLS error,
+          authentication failure, server disconnect before ``DATA``).
+
+        Returning ``EmailDeliveryResult`` (instead of ``bool``) lets callers
+        distinguish the ambiguous case and avoid clearing a pending OTP or
+        incrementing a resend counter when the email may already have been
+        sent.
+
+        Transient failures (connection timeout, server disconnect before
+        ``DATA``) are retried up to ``MAX_SEND_ATTEMPTS`` times with a short
+        delay, so brief network hiccups don't permanently block OTP delivery.
+        """
+        import logging
+        smtp_logger = logging.getLogger('studyhub.smtp')
+
+        max_attempts = OTPManager.MAX_SEND_ATTEMPTS
+        retry_delay = OTPManager.RETRY_DELAY_SECONDS
+
+        for attempt in range(1, max_attempts + 1):
+            result, can_retry, phase = OTPManager._attempt_send(
+                to_email, subject, body,
+            )
+
+            if result.is_success or not can_retry or attempt >= max_attempts:
+                return result
+
+            masked = OTPManager._mask_email_log(to_email)
+            smtp_logger.warning(
+                'SMTP send attempt %d/%d failed for %s (phase=%s), '
+                'retrying in %ds',
+                attempt, max_attempts, masked, phase, retry_delay,
+            )
+            time.sleep(retry_delay)
+
+        return RESULT_FAILURE
 
     @staticmethod
     def is_configured():

@@ -2,11 +2,38 @@ import os
 import time
 import threading
 from contextlib import contextmanager
+from datetime import datetime, date
 from config import Config
 import pymysql
 import psycopg
 import psycopg.rows
 import sqlite3
+
+
+def _adapt_datetime(value):
+    """Serialize datetime/date objects to ISO-8601 strings for SQLite.
+
+    Python 3.12 deprecated the default datetime adapter that sqlite3 used to
+    transparently convert ``datetime`` objects.  This explicit adapter stores
+    values in ``YYYY-MM-DD HH:MM:SS.ffffff`` form (space, not 'T', separator)
+    which is sortable lexicographically and compatible with the
+    ``_parse_datetime`` / ``_normalize_datetime`` parsers used throughout the
+    project.  PostgreSQL and MySQL are unaffected because psycopg3 and pymysql
+    handle datetime natively.
+    """
+    if isinstance(value, datetime):
+        return value.isoformat(' ')
+    if isinstance(value, date):
+        return value.isoformat(' ')
+    return value
+
+
+# Register the adapter once at module level.  This replaces the deprecated
+# default adapter so that passing a datetime object to any SQLite query no
+# longer triggers a DeprecationWarning on Python 3.12+.
+sqlite3.register_adapter(datetime, _adapt_datetime)
+sqlite3.register_adapter(date, _adapt_datetime)
+
 
 _tls = threading.local()
 _pg_lock = threading.Lock()
@@ -207,7 +234,11 @@ _pg_pool = PostgreSQLConnectionPool()
 def get_connection():
     """Return a database connection based on configuration.
 
-    Priority: PostgreSQL (DATABASE_URL) > SQLite (USE_SQLITE=true) > MySQL (default)
+    Priority: SQLite (USE_SQLITE=true) > PostgreSQL (DATABASE_URL) > MySQL (default)
+
+    When ``USE_SQLITE`` is explicitly set to true in the environment, it takes
+    priority over ``DATABASE_URL`` so that a locally present SQLite database
+    is never shadowed by a stale or empty PostgreSQL endpoint.
 
     For PostgreSQL, a thread-local connection pool is used to avoid the
     expensive cold-start latency of NeonDB's serverless compute on every
@@ -377,7 +408,7 @@ def _has_column(conn, table, column):
     if dialect == "sqlite":
         try:
             cur = conn.execute("PRAGMA table_info(%s)" % table)
-            cols = [row[1] for row in cur.fetchall()]
+            cols = [row[1] if not isinstance(row, dict) else row["name"] for row in cur.fetchall()]
         except Exception:
             return False
         return column in cols

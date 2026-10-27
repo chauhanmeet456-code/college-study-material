@@ -802,12 +802,19 @@ def revoke_user_session(user_id, session_id):
 
     if revoked and user.get('email'):
         from utils.notifications import send_template_notification
-        send_template_notification(
-            'session_terminated',
-            user['email'],
-            related_id=session_id,
-            dedupe_key='session_terminated:%d' % session_id,
-        )
+        try:
+            send_template_notification(
+                'session_terminated',
+                user['email'],
+                related_id=session_id,
+                dedupe_key='session_terminated:%d' % session_id,
+            )
+        except Exception:
+            # Session revocation was already committed inside the transaction
+            # above. A notification delivery failure (SMTP timeout, etc.) must
+            # never undo or mask the successful revocation — the change is
+            # persisted and a retry is queued by the notification layer.
+            pass
 
     return redirect(url_for('admin.user_security'))
 
@@ -859,12 +866,17 @@ def revoke_all_user_sessions(user_id):
 
     if revoked and user.get('email'):
         from utils.notifications import send_template_notification
-        send_template_notification(
-            'session_terminated',
-            user['email'],
-            related_id=user_id,
-            dedupe_key='session_terminated_all:%d' % user_id,
-        )
+        try:
+            send_template_notification(
+                'session_terminated',
+                user['email'],
+                related_id=user_id,
+                dedupe_key='session_terminated_all:%d' % user_id,
+            )
+        except Exception:
+            # Session revocation was already committed. Email failure must not
+            # undo the committed change; notification is queued for retry.
+            pass
 
     return redirect(url_for('admin.user_security'))
 

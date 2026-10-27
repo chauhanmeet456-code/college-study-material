@@ -10,6 +10,7 @@ restart.
 
 import hashlib
 import hmac
+import logging
 import secrets
 import time
 from functools import wraps
@@ -30,6 +31,8 @@ CSRF_FIELD_NAME = 'csrf_token'
 CSRF_HEADER_NAME = 'X-CSRF-Token'
 
 DEVICE_COOKIE_NAME = 'studyhub_device_id'
+
+_logger = logging.getLogger('studyhub.security')
 
 
 def generate_csrf_token():
@@ -72,6 +75,12 @@ def csrf_protect(view):
     def decorated(*args, **kwargs):
         if request.method in ('POST', 'PUT', 'PATCH', 'DELETE'):
             if not validate_csrf_token():
+                _logger.info(
+                    '[SECURITY_DIAG] csrf_rejected endpoint=%s referrer=%s redirect=%s',
+                    request.endpoint or 'unknown',
+                    request.referrer or 'none',
+                    request.form.get('next') or request.referrer or '/',
+                )
                 if request.is_json or request.headers.get('Accept') == 'application/json':
                     return {'success': False, 'message': 'Invalid or expired CSRF token.'}, 400
                 flash('Your session security check failed. Please try again.', 'danger')
