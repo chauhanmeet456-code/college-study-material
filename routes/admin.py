@@ -854,19 +854,11 @@ def revoke_all_user_sessions(user_id):
         revoked = False
         flash('Could not end the sessions. Please try again.', 'danger')
 
-    if revoked and user.get('email'):
-        from utils.notifications import send_template_notification
-        try:
-            send_template_notification(
-                'session_terminated',
-                user['email'],
-                related_id=user_id,
-                dedupe_key='session_terminated_all:%d' % user_id,
-            )
-        except Exception:
-            # Session revocation was already committed. Email failure must not
-            # undo the committed change; notification is queued for retry.
-            pass
+    # No email notification for session revocation — neither individual nor bulk.
+    # The affected user is notified via an in-browser popup the next time
+    # their session-token is checked (see utils/session_status.py and the
+    # JS polling in base.html).  All email channels remain for OTP, password
+    # resets, and account-deletion notifications.
 
     return redirect(url_for('admin.user_security'))
 

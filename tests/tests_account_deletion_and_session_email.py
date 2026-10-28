@@ -344,7 +344,7 @@ def main():
     remaining = UserSession.get_active_sessions_for_user(user_id)
     record('zero active sessions after revoke-all', len(remaining) == 0,
            'count=%d' % len(remaining))
-    record('session_terminated email sent for revoke-all', len(sent_emails) >= 1,
+    record('no email sent for bulk revocation', len(sent_emails) == 0,
            'count=%d' % len(sent_emails))
 
     print()

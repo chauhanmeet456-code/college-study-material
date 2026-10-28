@@ -487,17 +487,20 @@ def test_session_status_admin_user_not_affected():
 # Tests: revoke-all still sends email (preserved behaviour)
 # ---------------------------------------------------------------------------
 
-def test_revoke_all_still_uses_email_notification(test_user, sent_emails):
-    """Bulk session revocation (revoke-all) still sends an email — unchanged."""
+def test_revoke_all_sends_no_email(test_user, sent_emails):
+    """Bulk session revocation (revoke-all) must NOT send an email either.
+
+    Per requirements, ALL session revocation (individual and bulk) uses the
+    in-browser popup instead of email notification.  OTP, password-reset,
+    and account-deletion emails are unaffected.
+    """
     user_id, email = test_user
 
     # Ensure no stale dedupe rows from previous test runs
     with app.app_context():
         conn = get_connection()
         cursor = get_cursor(conn)
-        cursor.execute(
-            "DELETE FROM pending_notifications WHERE dedupe_key LIKE 'session_terminated_all:%d'"
-            % user_id)
+        cursor.execute("DELETE FROM pending_notifications WHERE dedupe_key LIKE 'session_terminated%'")
         conn.commit()
         close_cursor(cursor)
         conn.close()
@@ -514,10 +517,22 @@ def test_revoke_all_still_uses_email_notification(test_user, sent_emails):
     admin.post('/admin/users/%d/revoke-all-sessions' % user_id,
                data={'csrf_token': csrf}, follow_redirects=False)
 
-    # revoke-all still sends the session_terminated email
-    assert len(sent_emails) >= 1, \
-        "Expected at least one email for bulk revocation, got %d" % len(sent_emails)
-    assert sent_emails[0][0] == email
+    # No email at all for bulk session revocation
+    assert len(sent_emails) == 0, \
+        "Expected no email for bulk revocation, got %d" % len(sent_emails)
+
+    # Also verify no notification row was persisted
+    with app.app_context():
+        conn = get_connection()
+        cursor = get_cursor(conn)
+        cursor.execute(
+            "SELECT COUNT(*) AS total FROM pending_notifications "
+            "WHERE dedupe_key LIKE 'session_terminated_all:%d'" % user_id)
+        row = cursor.fetchone()
+        close_cursor(cursor)
+        conn.close()
+    assert row['total'] == 0, \
+        "Expected no notification row for bulk revocation"
 
 
 if __name__ == '__main__':
