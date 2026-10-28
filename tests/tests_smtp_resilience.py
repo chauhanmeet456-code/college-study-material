@@ -315,6 +315,107 @@ def test_quit_exception_does_not_propagate():
         assert result.is_success  # should still return a valid result
 
 
+def test_quit_not_called_when_sock_is_none():
+    """quit() must NOT be called when server.sock is None.
+
+    Python's SMTP.quit() raises SMTPServerDisconnected('please run connect()
+    first') when self.sock is None.  This happens when starttls() or login()
+    closes the socket before the finally block runs.  The fix guards quit()
+    with a sock check and falls back to close().
+    """
+    quit_call_count = []
+
+    class SocklessSMTP(FakeSMTP):
+        """Simulates starttls() failure that sets sock=None (like real smtplib)."""
+        def starttls(self, context=None):
+            self.sock = None
+            raise smtplib.SMTPServerDisconnected('Connection unexpectedly closed')
+
+        def quit(self):
+            quit_call_count.append(1)
+            if self.sock is None:
+                raise smtplib.SMTPServerDisconnected(
+                    'please run connect() first'
+                )
+
+    with app.app_context():
+        with patch('smtplib.SMTP', SocklessSMTP):
+            result = OTPManager.send_email(
+                'user@example.com', 'Test', '<p>Body</p>',
+            )
+
+    # quit() must not have been called because sock was None
+    assert quit_call_count == [], \
+        "quit() should not be called when server.sock is None"
+
+    # The result should be a failure with retry (starttls is a transient failure)
+    assert result.is_failure
+
+
+def test_quit_socket_already_none_does_not_raise():
+    """If sock is None before quit, quit must not raise or be called.
+
+    This is a direct test of the SMTPServerDisconnected('please run connect()
+    first') scenario that the user reported.
+    """
+    class DisconnectOnStarttlsSMTP(FakeSMTP):
+        quit_called = False
+
+        def starttls(self, context=None):
+            self.sock = None
+            raise smtplib.SMTPServerDisconnected('TLS error')
+
+        def quit(self):
+            type(self).quit_called = True
+            # This is what the real smtplib.SMTP.quit() does when sock is None
+            if self.sock is None:
+                raise smtplib.SMTPServerDisconnected(
+                    'please run connect() first'
+                )
+
+    with app.app_context():
+        with patch('smtplib.SMTP', DisconnectOnStarttlsSMTP):
+            result = OTPManager.send_email(
+                'user@example.com', 'Test', '<p>Body</p>',
+            )
+
+    assert DisconnectOnStarttlsSMTP.quit_called is False, \
+        "quit() should not be called when sock is None"
+    assert result.is_failure
+
+
+def test_quit_called_and_raises_still_swallowed():
+    """Even if quit() raises (sock present but server gone), it must be caught."""
+    class RaisingQuitSMTP(FakeSMTP):
+        def quit(self):
+            raise smtplib.SMTPServerDisconnected('disconnect during quit')
+
+    with app.app_context():
+        with patch('smtplib.SMTP', RaisingQuitSMTP):
+            result = OTPManager.send_email(
+                'user@example.com', 'Test', '<p>Body</p>',
+            )
+        assert result.is_success
+
+
+def test_close_called_after_successful_send():
+    """close() must be called in the finally block even on success."""
+    close_called = []
+
+    class TrackingSMTP(FakeSMTP):
+        def close(self):
+            close_called.append(1)
+
+    with app.app_context():
+        with patch('smtplib.SMTP', TrackingSMTP):
+            result = OTPManager.send_email(
+                'user@example.com', 'Test', '<p>Body</p>',
+            )
+        assert result.is_success
+        assert len(close_called) == 1, \
+            "close() should be called exactly once per attempt"
+
+
 def test_send_email_catches_any_exception_from_attempt_send():
     """send_email must return RESULT_FAILURE if _attempt_send raises."""
     with app.app_context():

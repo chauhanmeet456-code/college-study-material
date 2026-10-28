@@ -327,19 +327,32 @@ class OTPManager:
             if server:
                 try:
                     # Only attempt QUIT if we still have a live connection.
-                    # Calling quit() on an already-disconnected socket can
-                    # trigger an additional timeout that adds to the delay.
+                    # Calling quit() on an already-disconnected socket (sock is
+                    # None) raises SMTPServerDisconnected('please run connect()
+                    # first'), which is wasteful and can mask the original error.
                     if not data_sent:
-                        # Use a short timeout for the QUIT handshake so that
-                        # a dead socket doesn't cause a multi-second hang.
                         if hasattr(server, 'sock') and server.sock:
+                            # Use a short timeout for the QUIT handshake so that
+                            # a dead socket doesn't cause a multi-second hang.
                             try:
                                 server.sock.settimeout(
                                     getattr(Config, 'MAIL_QUIT_TIMEOUT', 2)
                                 )
                             except (AttributeError, OSError):
                                 pass
-                        server.quit()
+                            try:
+                                server.quit()
+                            except (smtplib.SMTPServerDisconnected,
+                                    smtplib.SMTPException):
+                                # Server already gone — nothing to quit.
+                                pass
+                except Exception:
+                    pass
+                # Always close the socket to release file-descriptor / OS
+                # resources.  SMTP.close() is safe to call even when the
+                # socket is already None or closed.
+                try:
+                    server.close()
                 except Exception:
                     pass
 
