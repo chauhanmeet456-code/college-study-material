@@ -366,5 +366,3 @@ def session_status():
         return jsonify({'valid': False, 'reason': 'logged_out'})
 
     return jsonify({'valid': False, 'reason': status or 'unknown'})
-
-    return redirect(url_for('user.login_history'))

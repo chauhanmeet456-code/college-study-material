@@ -507,6 +507,224 @@ def test_notification_not_duplicated(mock_smtp):
         assert count == 1
 
 
+def test_ambiguous_delivery_not_queued_for_retry(mock_smtp):
+    """An ambiguous send (data may have been sent) must NOT be retried.
+
+    When SMTPServerDisconnected occurs during send_message, the result is
+    AMBIGUOUS — the server may have accepted the DATA payload before
+    disconnecting.  Retrying would risk duplicate delivery.  The
+    notification must be marked as SENT (not FAILED) so process_pending
+    does not pick it up.
+    """
+    from utils.notifications import NotificationService
+
+    with app.app_context():
+        FakeSMTP.scenario = (False, False, False, True, True)  # send disconnect
+        with patch.object(OTPManager, 'is_configured', return_value=True):
+            r = NotificationService.send_or_enqueue(
+                'ambiguous_test@example.com', 'Subject', 'Body',
+                'test', related_id=1, dedupe_key='smtp_ambiguous_test',
+            )
+
+        conn = get_connection()
+        row = conn.execute(
+            "SELECT status FROM pending_notifications WHERE dedupe_key = ?",
+            ('smtp_ambiguous_test',),
+        ).fetchone()
+        conn.close()
+
+    # Must NOT return RESULT_QUEUED (which would trigger retries)
+    assert r == NotificationService.RESULT_SENT, \
+        "Ambiguous delivery should be treated as sent (not queued)"
+    # Must be stored as SENT, not FAILED
+    assert row is not None
+    assert row["status"] == 'sent', \
+        "Ambiguous notification should be marked 'sent' to prevent retry"
+
+
+def test_failed_delivery_queued_for_retry(mock_smtp):
+    """A hard failure (connect timeout) must still be queued for retry."""
+    from utils.notifications import NotificationService
+
+    with app.app_context():
+        FakeSMTP.scenario = (True, False, False, False, False)  # connect timeout
+        with patch.object(OTPManager, 'is_configured', return_value=True):
+            r = NotificationService.send_or_enqueue(
+                'retry_test@example.com', 'Subject', 'Body',
+                'test', related_id=1, dedupe_key='smtp_retry_test',
+            )
+
+        conn = get_connection()
+        row = conn.execute(
+            "SELECT status FROM pending_notifications WHERE dedupe_key = ?",
+            ('smtp_retry_test',),
+        ).fetchone()
+        conn.close()
+
+    assert r == NotificationService.RESULT_QUEUED
+    assert row is not None
+    assert row["status"] == 'failed'
+
+
+def test_process_pending_does_not_retry_ambiguous(mock_smtp):
+    """The notification retry sweep must skip ambiguous notifications."""
+    from utils.notifications import NotificationService
+
+    with app.app_context():
+        # Insert an ambiguous notification manually
+        conn = get_connection()
+        conn.execute(
+            "INSERT INTO pending_notifications "
+            "(recipient_email, subject, body, purpose, related_id, "
+            "dedupe_key, attempt, status) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'sent')",
+            ('ambiguous@example.com', 'Subject', 'Body', 'test', 1,
+             'smtp_no_retry_ambiguous', 0),
+        )
+        conn.commit()
+        conn.close()
+
+        # Now try to process pending — should not find the ambiguous one
+        FakeSMTP.scenario = (True, False, False, False, False)  # connect fail
+        processed, sent = NotificationService.process_pending(limit=10)
+
+    # The ambiguous notification should not have been retried
+    assert sent == 0, "Ambiguous notifications should not be retried"
+
+
+def test_process_pending_marks_ambiguous_as_sent_not_retry(mock_smtp):
+    """When deliver() returns ambiguous during process_pending, mark 'sent' not retry.
+
+    BUG: process_pending used bool(result) to check for success.  An ambiguous
+    EmailDeliveryResult has bool() == False (because __bool__ returns True only
+    for SUCCESS), so the code fell through to the else branch and incremented
+    attempt while leaving status as 'failed'.  The row was retried on every
+    sweep, risking duplicate email delivery.
+    """
+    from utils.notifications import NotificationService
+
+    with app.app_context():
+        # Insert a 'failed' notification that will receive an ambiguous result
+        conn = get_connection()
+        conn.execute(
+            "INSERT INTO pending_notifications "
+            "(recipient_email, subject, body, purpose, related_id, "
+            "dedupe_key, attempt, status) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'failed')",
+            ('ambiguous_retry@example.com', 'Subject', 'Body', 'test', 1,
+             'smtp_ambiguous_retry_test', 0),
+        )
+        conn.commit()
+        conn.close()
+
+        # send disconnect during send_message -> ambiguous
+        FakeSMTP.scenario = (False, False, False, True, True)
+
+        with patch.object(OTPManager, 'is_configured', return_value=True):
+            processed, sent = NotificationService.process_pending(limit=10)
+
+        # Verify the row was marked 'sent' with attempt unchanged
+        conn = get_connection()
+        row = conn.execute(
+            "SELECT status, attempt FROM pending_notifications WHERE dedupe_key = ?",
+            ('smtp_ambiguous_retry_test',),
+        ).fetchone()
+        conn.close()
+
+    assert processed == 1, f"Should process exactly one row, got {processed}"
+    assert sent == 1, "Ambiguous delivery should count as sent"
+    assert row is not None
+    assert row["status"] == 'sent', \
+        f"Ambiguous should mark as 'sent', got '{row['status']}'"
+    assert row["attempt"] == 0, \
+        "Ambiguous should NOT increment attempt counter"
+
+
+def test_process_pending_retries_pending_status(mock_smtp):
+    """'pending' status rows (SMTP was not configured) must be retried.
+
+    BUG: process_pending only selected status = 'failed'.  Rows stored as
+    'pending' (because SMTP was not configured at send_or_enqueue time) were
+    never picked up for retry, so they sat in the queue forever even after
+    SMTP became available.
+    """
+    from utils.notifications import NotificationService
+
+    with app.app_context():
+        # Insert a 'pending' notification (SMTP was not configured)
+        conn = get_connection()
+        conn.execute(
+            "INSERT INTO pending_notifications "
+            "(recipient_email, subject, body, purpose, related_id, "
+            "dedupe_key, attempt, status) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')",
+            ('pending_retry@example.com', 'Subject', 'Body', 'test', 1,
+             'smtp_pending_retry_test', 0),
+        )
+        conn.commit()
+        conn.close()
+
+        # SMTP is now configured and send succeeds
+        FakeSMTP.scenario = (False, False, False, False, False)
+
+        with patch.object(OTPManager, 'is_configured', return_value=True):
+            processed, sent = NotificationService.process_pending(limit=10)
+
+        conn = get_connection()
+        row = conn.execute(
+            "SELECT status FROM pending_notifications WHERE dedupe_key = ?",
+            ('smtp_pending_retry_test',),
+        ).fetchone()
+        conn.close()
+
+    assert processed == 1, f"Should process the pending row, got processed={processed}"
+    assert sent == 1, "Pending row should be delivered and marked sent"
+    assert row is not None
+    assert row["status"] == 'sent', \
+        f"Pending row should be marked 'sent' after successful retry, got '{row['status']}'"
+
+
+def test_process_pending_does_not_increment_attempt_when_smtp_unconfigured(mock_smtp):
+    """'pending' rows skipped when SMTP is still unconfigured must NOT exhaust attempts.
+
+    When SMTP is not configured, deliver() returns False.  The row should stay
+    'pending' with attempt unchanged so it remains eligible for future sweeps.
+    """
+    from utils.notifications import NotificationService
+
+    with app.app_context():
+        conn = get_connection()
+        conn.execute(
+            "INSERT INTO pending_notifications "
+            "(recipient_email, subject, body, purpose, related_id, "
+            "dedupe_key, attempt, status) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')",
+            ('unconfigured@example.com', 'Subject', 'Body', 'test', 1,
+             'smtp_unconfigured_test', 0),
+        )
+        conn.commit()
+        conn.close()
+
+        # SMTP not configured — deliver() will return False without sending
+        with patch.object(OTPManager, 'is_configured', return_value=False):
+            processed, sent = NotificationService.process_pending(limit=10)
+
+        conn = get_connection()
+        row = conn.execute(
+            "SELECT status, attempt FROM pending_notifications WHERE dedupe_key = ?",
+            ('smtp_unconfigured_test',),
+        ).fetchone()
+        conn.close()
+
+    assert processed == 1, "Should process the pending row even when SMTP is unconfigured"
+    assert sent == 0, "Nothing should be marked sent when SMTP is unconfigured"
+    assert row is not None
+    assert row["status"] == 'pending', \
+        f"Should remain 'pending' when SMTP is unconfigured, got '{row['status']}'"
+    assert row["attempt"] == 0, \
+        "Attempt should NOT increment when SMTP is unconfigured"
+
+
 # ---------------------------------------------------------------------------
 # Tests for session revocation resilience
 # ---------------------------------------------------------------------------
@@ -648,6 +866,30 @@ def test_transaction_rollback_when_revocation_fails():
             )
             conn.commit()
             conn.close()
+
+
+def test_account_deletion_email_still_works(mock_smtp):
+    """Account deletion must still send the account_deleted_by_admin email.
+
+    This is a regression guard: the SMTP fixes must NOT remove or bypass
+    the notification call in delete_user() at routes/admin.py.
+    """
+    from utils.notifications import send_template_notification, NotificationService
+    from utils.otp import EmailDeliveryResult
+
+    # Verify the account_deleted_by_admin template exists and can be sent
+    with app.app_context():
+        FakeSMTP.scenario = (False, False, False, False, False)  # success
+        with patch.object(OTPManager, 'is_configured', return_value=True):
+            result = send_template_notification(
+                'account_deleted_by_admin',
+                'deleted_admin_test@example.com',
+                related_id=99999,
+                dedupe_key='smtp_account_delete_test',
+            )
+
+    assert result == NotificationService.RESULT_SENT, \
+        "Account deletion email should still be sent"
 
 
 if __name__ == "__main__":

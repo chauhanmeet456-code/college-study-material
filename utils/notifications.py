@@ -83,9 +83,11 @@ TEMPLATES = {
 def deliver(recipient_email, subject, body):
     """Attempt a single SMTP send through the existing mail transport.
 
-    Returns ``True`` only when the provider accepted the message.  Any SMTP
-    timeout or connection failure is caught and logged safely (no credentials
-    or message bodies are written to the log).
+    Returns ``True`` only when the provider accepted the message, or an
+    ``EmailDeliveryResult`` when delivery was uncertain (ambiguous) so the
+    caller can decide not to retry.  Any SMTP timeout or connection failure
+    is caught and logged safely (no credentials or message bodies are written
+    to the log).
     """
     if not recipient_email:
         log.warning('Notification skipped: no recipient address')
@@ -97,7 +99,15 @@ def deliver(recipient_email, subject, body):
         )
         return False
     try:
-        return bool(OTPManager.send_email(recipient_email, subject, body))
+        result = OTPManager.send_email(recipient_email, subject, body)
+        # AMBIGUOUS means the server may have accepted the DATA payload
+        # before disconnecting (common with Gmail timeouts).  Return the
+        # result object so send_or_enqueue can distinguish "maybe sent"
+        # from a hard failure — preventing duplicate retries.
+        from utils.otp import EmailDeliveryResult
+        if isinstance(result, EmailDeliveryResult) and result.is_ambiguous:
+            return result
+        return bool(result)
     except Exception as exc:  # pragma: no cover - defensive
         log.warning(
             'SMTP delivery failed for a notification to %s (%s)',
@@ -172,6 +182,21 @@ class NotificationService:
                         related_id, dedupe_key,
                         NotificationService.STATUS_SENT, 1,
                     )
+                elif (hasattr(sent, 'is_ambiguous') and sent.is_ambiguous):
+                    # Ambiguous: the server may have accepted the DATA payload
+                    # before disconnecting (common with Gmail timeouts).  Mark
+                    # as SENT so the retry sweep does NOT resend and risk
+                    # duplicate delivery.  Log for operational visibility.
+                    log.info(
+                        'Email delivery ambiguous for %s (may have been '
+                        'sent; will not retry to avoid duplicates)',
+                        _mask_email(recipient_email),
+                    )
+                    NotificationService._insert(
+                        conn, recipient_email, subject, body, purpose,
+                        related_id, dedupe_key,
+                        NotificationService.STATUS_SENT, 1,
+                    )
                 else:
                     status = (NotificationService.STATUS_FAILED
                               if OTPManager.is_configured()
@@ -190,6 +215,8 @@ class NotificationService:
 
         if sent:
             return NotificationService.RESULT_SENT
+        if (hasattr(sent, 'is_ambiguous') and sent.is_ambiguous):
+            return NotificationService.RESULT_SENT  # ambiguous → treat as delivered
         if not OTPManager.is_configured():
             return NotificationService.RESULT_NOT_CONFIGURED
         return NotificationService.RESULT_QUEUED
@@ -219,10 +246,20 @@ class NotificationService:
     def process_pending(limit=100, max_attempts=None):
         """Retry every queued notification whose attempt budget is not exhausted.
 
-        Returns ``(processed, sent)``.  Each notification is retried at most
-        ``MAX_ATTEMPTS`` times, after which it is left in the ``failed`` state
-        for manual/operational review, which bounds the number of deliveries
-        for any single event to ``MAX_ATTEMPTS``.
+        Returns ``(processed, sent)``.  Selects rows with ``status IN ('failed',
+        'pending')`` so that:
+
+        * **Pending** rows (SMTP was not configured when first enqueued) are
+          retried without incrementing the attempt counter; they remain
+          eligible until mail transport becomes available.
+        * **Failed** rows (SMTP was configured but delivery failed) are retried
+          up to ``MAX_ATTEMPTS`` times, incrementing ``attempt`` on each failure.
+        * **Ambiguous** deliveries (server disconnected after ``DATA``) are marked
+          ``'sent'`` to avoid duplicate delivery on the next sweep.
+
+        Rows whose attempt budget is exhausted are left in the ``failed`` state
+        for manual/operational review, bounding deliveries for any single event
+        to ``MAX_ATTEMPTS``.
         """
         max_attempts = max_attempts or NotificationService.MAX_ATTEMPTS
         processed = 0
@@ -234,7 +271,7 @@ class NotificationService:
             cur = get_cursor(conn)
             cur.execute(
                 "SELECT id, recipient_email, subject, body FROM "
-                "pending_notifications WHERE status = 'failed' "
+                "pending_notifications WHERE status IN ('failed', 'pending') "
                 "AND attempt < ? ORDER BY created_at ASC, id ASC LIMIT ?",
                 (max_attempts, limit),
             )
@@ -251,10 +288,39 @@ class NotificationService:
                         (datetime.now(), row['id']),
                     )
                     sent += 1
+                elif hasattr(ok, 'is_ambiguous') and ok.is_ambiguous:
+                    # Ambiguous: the server may have accepted the DATA payload
+                    # before disconnecting (common with Gmail timeouts).  Mark
+                    # as SENT so the retry sweep does NOT resend and risk
+                    # duplicate delivery.  This mirrors the logic in
+                    # send_or_enqueue and prevents the ambiguous row from
+                    # being retried on every sweep.
+                    log.info(
+                        'Email delivery ambiguous for %s (may have been '
+                        'sent; will not retry to avoid duplicates)',
+                        _mask_email(row['recipient_email']),
+                    )
+                    cur.execute(
+                        "UPDATE pending_notifications SET status = 'sent', "
+                        "last_attempt_at = ? WHERE id = ?",
+                        (datetime.now(), row['id']),
+                    )
+                    sent += 1
+                elif not OTPManager.is_configured():
+                    # SMTP transport is not configured — the notification has
+                    # not actually been attempted yet.  Keep the status as-is
+                    # (pending rows stay pending) and do NOT increment the
+                    # attempt counter, so the row remains eligible for future
+                    # sweeps once mail transport becomes available.
+                    cur.execute(
+                        "UPDATE pending_notifications SET last_attempt_at = ? "
+                        "WHERE id = ?",
+                        (datetime.now(), row['id']),
+                    )
                 else:
                     cur.execute(
                         "UPDATE pending_notifications SET attempt = attempt + 1, "
-                        "last_attempt_at = ? WHERE id = ?",
+                        "status = 'failed', last_attempt_at = ? WHERE id = ?",
                         (datetime.now(), row['id']),
                     )
                 conn.commit()
