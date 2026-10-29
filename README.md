@@ -197,11 +197,14 @@ Edit `.env` based on your database choice:
 USE_SQLITE=true
 SECRET_KEY=your_very_long_random_secret_key
 
-# Optional: SMTP for OTP emails
+# SMTP for OTP and queued notification emails
 MAIL_SERVER=smtp.gmail.com
 MAIL_PORT=587
 MAIL_USERNAME=your_email@gmail.com
 MAIL_PASSWORD=your_app_password
+MAIL_CONNECT_TIMEOUT=3
+MAIL_TIMEOUT=10
+MAIL_SEND_TIMEOUT=8
 ```
 
 #### Option B: PostgreSQL / NeonDB (Production - recommended)
@@ -217,7 +220,7 @@ MAIL_USERNAME=your_email@gmail.com
 MAIL_PASSWORD=your_app_password
 ```
 
-> **Note**: Database connection priority is: PostgreSQL (`DATABASE_URL`) > SQLite (`USE_SQLITE=true`) > MySQL (default).
+> **Note**: Explicit `USE_SQLITE=true` selects SQLite first; otherwise a configured PostgreSQL `DATABASE_URL` is used, then MySQL.
 
 ### Step 5: Initialize Database
 
@@ -246,6 +249,46 @@ Visit: http://127.0.0.1:5000
 - **Student Site**: http://127.0.0.1:5000
 - **Admin Login**: http://127.0.0.1:5000/admin/login
 
+### Email notification worker
+
+Login, registration, and password-reset OTPs remain synchronous and are sent
+only after credentials are validated. Account-deletion confirmation emails are
+stored in the database transaction with the deletion and are delivered by a
+separate worker process; the Flask request does not wait for SMTP.
+
+Run the worker in a separate terminal or supervised process:
+
+```bash
+python -m utils.notification_worker
+```
+
+The worker is not started when Flask is imported. It polls every
+`NOTIFICATION_POLL_INTERVAL` seconds (default 15), retries confirmed transient
+failures with bounded exponential backoff, and limits retries using
+`NOTIFICATION_WORKER_MAX_ATTEMPTS` (default 5). Configure `MAIL_CONNECT_TIMEOUT`,
+`MAIL_TIMEOUT`, and `MAIL_SEND_TIMEOUT` for bounded SMTP waits.
+
+Queue jobs are stored in `pending_notifications`. Inspect their outcome with:
+
+```sql
+SELECT id, purpose, status, attempt, retryable, next_attempt_at, last_error
+FROM pending_notifications
+ORDER BY created_at DESC;
+```
+
+`pending` means delivery has not been attempted or SMTP was not configured;
+`processing` is a leased job; `sent` means SMTP acceptance was confirmed;
+`failed` is a confirmed failure (retryable jobs have a future attempt time);
+and `ambiguous` means SMTP may have accepted the message, so it is not retried
+automatically. After a worker restart, expired `processing` leases are marked
+`ambiguous` rather than resent. Investigate permanent failures and ambiguous
+jobs manually; do not mark ambiguous messages as delivered without evidence.
+
+Online payments and financial transaction processing were audited and no
+payment gateway, checkout, refund, or payment route/model/dependency was found.
+Database transactions (`BEGIN`, `COMMIT`, `ROLLBACK`, and savepoints) remain
+part of the required persistence layer.
+
 ## Database
 
 The application supports three database backends with automatic selection:
@@ -256,7 +299,7 @@ The application supports three database backends with automatic selection:
 | PostgreSQL | `DATABASE_URL=<url>` | Production (NeonDB) |
 | MySQL | Default (no SQLite/PostgreSQL) | Alternative production |
 
-**Connection Priority**: `DATABASE_URL` (PostgreSQL) > `USE_SQLITE=true` (SQLite) > MySQL default
+**Connection Priority**: `USE_SQLITE=true` (SQLite) > `DATABASE_URL` (PostgreSQL) > MySQL default
 
 The database abstraction layer (`utils/database.py`) handles:
 - Connection management for all three backends

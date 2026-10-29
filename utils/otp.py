@@ -1,5 +1,7 @@
 import smtplib
+import socket
 import ssl
+import logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import secrets
@@ -22,8 +24,12 @@ class EmailDeliveryResult:
     FAILURE = 'failure'
     AMBIGUOUS = 'ambiguous'
 
-    def __init__(self, status):
+    def __init__(self, status, retryable=False, phase=None,
+                 exception_type=None):
         self.status = status
+        self.retryable = retryable
+        self.phase = phase
+        self.exception_type = exception_type
 
     @property
     def is_success(self):
@@ -194,12 +200,10 @@ class OTPManager:
         the failure was transient and a second attempt is meaningful (i.e. the
         disconnect happened before the message payload was sent).
         """
-        import socket as _socket
-
-        start = time.time()
+        start = time.monotonic()
         server = None
         phase = 'init'
-        data_sent = False
+        smtp_logger = logging.getLogger('studyhub.smtp')
 
         # Build the MIME message outside the retry loop — it is safe to reuse.
         msg = MIMEMultipart()
@@ -210,151 +214,117 @@ class OTPManager:
 
         try:
             context = ssl.create_default_context()
-            connect_timeout = getattr(Config, 'MAIL_CONNECT_TIMEOUT', 5)
-            old_default = _socket.getdefaulttimeout()
-            _socket.setdefaulttimeout(connect_timeout)
-            try:
-                phase = 'connect'
-                server = smtplib.SMTP(Config.MAIL_SERVER, Config.MAIL_PORT,
-                                      timeout=connect_timeout)
-            finally:
-                _socket.setdefaulttimeout(old_default)
+            connect_timeout = max(
+                1, min(int(getattr(Config, 'MAIL_CONNECT_TIMEOUT', 5)), 30)
+            )
+            socket_timeout = max(
+                1, min(int(getattr(Config, 'MAIL_TIMEOUT', 10)), 60)
+            )
+            send_timeout = max(
+                1, min(int(getattr(Config, 'MAIL_SEND_TIMEOUT', 8)), 30)
+            )
 
-            # After the initial handshake, use the longer MAIL_TIMEOUT for the
-            # remaining SMTP conversation (STARTTLS, login, send).
-            if server and server.sock:
-                try:
-                    server.sock.settimeout(Config.MAIL_TIMEOUT)
-                except (AttributeError, OSError):
-                    pass
-
+            phase = 'connect'
+            smtp_logger.debug(
+                'SMTP configured endpoint host=%s port=%s',
+                Config.MAIL_SERVER,
+                Config.MAIL_PORT,
+            )
+            server = smtplib.SMTP(
+                Config.MAIL_SERVER, Config.MAIL_PORT, timeout=connect_timeout,
+            )
             phase = 'starttls'
             server.starttls(context=context)
+            if server.sock:
+                server.sock.settimeout(socket_timeout)
 
             phase = 'login'
             server.login(Config.MAIL_USERNAME, Config.MAIL_PASSWORD)
+            if server.sock:
+                server.sock.settimeout(socket_timeout)
 
-            # Use a shorter timeout for the message-send phase so that a
-            # silently-disconnecting server is detected sooner, reducing the
-            # worst-case login delay.
-            send_timeout = getattr(Config, 'MAIL_SEND_TIMEOUT', 8)
-            if server and server.sock:
-                try:
-                    server.sock.settimeout(min(Config.MAIL_TIMEOUT, send_timeout))
-                except (AttributeError, OSError):
-                    pass
-
+            if server.sock:
+                server.sock.settimeout(min(socket_timeout, send_timeout))
             phase = 'send'
             server.send_message(msg)
-            data_sent = True
-
-            elapsed = time.time() - start
-            print(f'[TIMING] Email sent in {elapsed:.3f}s', flush=True)
+            smtp_logger.info(
+                'SMTP phase=%s outcome=success elapsed=%.3fs exception=none retry=no',
+                phase, time.monotonic() - start,
+            )
             return RESULT_SUCCESS, False, phase
-        except smtplib.SMTPServerDisconnected as e:
-            elapsed = time.time() - start
-            if data_sent:
-                # send_message() completed; the disconnect happened during
-                # quit() or afterwards — the email was sent.
-                print(f'[TIMING] Email sent but server disconnected after {elapsed:.3f}s',
-                      flush=True)
-                return RESULT_SUCCESS, False, phase
+        except smtplib.SMTPServerDisconnected as exc:
             if phase == 'send':
-                # The server may have accepted the message data before
-                # disconnecting.  This is common with Gmail and some other
-                # providers that accept the payload and close the connection
-                # before the client reads the final 250 reply.
-                print(f'[TIMING] Email send interrupted after {elapsed:.3f}s: '
-                      f'SMTPServerDisconnected (ambiguous — message data likely sent)',
-                      flush=True)
-                # Do NOT retry — the message may already have been sent,
-                # retrying risks duplicate delivery.
-                return RESULT_AMBIGUOUS, False, phase
-            # Disconnect during connect / starttls / login — transient
-            print(f'[TIMING] Email failed after {elapsed:.3f}s: '
-                  f'SMTPServerDisconnected (pre-send, phase={phase})',
-                  flush=True)
-            return RESULT_FAILURE, True, phase
-        except smtplib.SMTPAuthenticationError:
-            elapsed = time.time() - start
-            # Authentication failure is permanent — never retry.
-            print(f'[TIMING] SMTP authentication failed after {elapsed:.3f}s',
-                  flush=True)
-            return RESULT_FAILURE, False, phase
-        except (TimeoutError, ConnectionError) as e:
-            elapsed = time.time() - start
+                return OTPManager._smtp_ambiguous(start, phase, exc)
+            return OTPManager._smtp_failure(start, phase, exc, retryable=True)
+        except smtplib.SMTPAuthenticationError as exc:
+            return OTPManager._smtp_failure(start, phase, exc, retryable=False)
+        except smtplib.SMTPResponseException as exc:
+            retryable = 400 <= int(exc.smtp_code) < 500
+            return OTPManager._smtp_failure(start, phase, exc, retryable)
+        except (TimeoutError, socket.timeout, ConnectionError, OSError) as exc:
             if phase == 'send':
-                # Timeout during message send is ambiguous — data may have been
-                # transmitted.  Do not retry to avoid duplicates.
-                print(f'[TIMING] Email send interrupted after {elapsed:.3f}s: '
-                      f'Timeout (ambiguous — message data may have been sent)',
-                      flush=True)
-                return RESULT_AMBIGUOUS, False, phase
-            # Timeout or connection error during connect/starttls/login — retry
-            print(f'[TIMING] Email failed after {elapsed:.3f}s: '
-                  f'{type(e).__name__} (phase={phase})',
-                  flush=True)
-            return RESULT_FAILURE, True, phase
-        except OSError as e:
-            # Catch-all OSError (socket-level) that is not TimeoutError or
-            # ConnectionError — e.g. network unreachable.  These are typically
-            # transient during connect/login.
-            elapsed = time.time() - start
+                return OTPManager._smtp_ambiguous(start, phase, exc)
+            return OTPManager._smtp_failure(start, phase, exc, retryable=True)
+        except smtplib.SMTPException as exc:
+            return OTPManager._smtp_failure(start, phase, exc, retryable=False)
+        except Exception as exc:
             if phase == 'send':
-                # OSError during send is ambiguous — data may have been sent.
-                print(f'[TIMING] Email send interrupted after {elapsed:.3f}s: '
-                      f'OSError (ambiguous — message data may have been sent)',
-                      flush=True)
-                return RESULT_AMBIGUOUS, False, phase
-            print(f'[TIMING] Email failed after {elapsed:.3f}s: '
-                  f'{type(e).__name__} (phase={phase})',
-                  flush=True)
-            return RESULT_FAILURE, True, phase
-        except Exception as e:
-            elapsed = time.time() - start
-            if data_sent:
-                return RESULT_SUCCESS, False, phase
-            if phase == 'send':
-                # Unknown error during send — treat as ambiguous, do not retry.
-                print(f'[TIMING] Email send interrupted after {elapsed:.3f}s: '
-                      f'{type(e).__name__} (ambiguous)',
-                      flush=True)
-                return RESULT_AMBIGUOUS, False, phase
-            print(f'[TIMING] Email failed after {elapsed:.3f}s: {type(e).__name__}',
-                  flush=True)
-            return RESULT_FAILURE, True, phase
+                return OTPManager._smtp_ambiguous(start, phase, exc)
+            return OTPManager._smtp_failure(start, phase, exc, retryable=False)
         finally:
             if server:
                 try:
-                    # Only attempt QUIT if we still have a live connection.
-                    # Calling quit() on an already-disconnected socket (sock is
-                    # None) raises SMTPServerDisconnected('please run connect()
-                    # first'), which is wasteful and can mask the original error.
-                    if not data_sent:
-                        if hasattr(server, 'sock') and server.sock:
-                            # Use a short timeout for the QUIT handshake so that
-                            # a dead socket doesn't cause a multi-second hang.
-                            try:
-                                server.sock.settimeout(
-                                    getattr(Config, 'MAIL_QUIT_TIMEOUT', 2)
-                                )
-                            except (AttributeError, OSError):
-                                pass
-                            try:
-                                server.quit()
-                            except (smtplib.SMTPServerDisconnected,
-                                    smtplib.SMTPException):
-                                # Server already gone — nothing to quit.
-                                pass
-                except Exception:
-                    pass
-                # Always close the socket to release file-descriptor / OS
-                # resources.  SMTP.close() is safe to call even when the
-                # socket is already None or closed.
-                try:
-                    server.close()
-                except Exception:
-                    pass
+                    if server.sock:
+                        server.sock.settimeout(2)
+                        server.quit()
+                except Exception as exc:
+                    smtp_logger.debug(
+                        'SMTP cleanup phase=quit exception=%s',
+                        type(exc).__name__,
+                    )
+                finally:
+                    try:
+                        server.close()
+                    except Exception as exc:
+                        smtp_logger.debug(
+                            'SMTP cleanup phase=close exception=%s',
+                            type(exc).__name__,
+                        )
+
+    @staticmethod
+    def _smtp_failure(start, phase, exc, retryable):
+        elapsed = time.monotonic() - start
+        logging.getLogger('studyhub.smtp').warning(
+            'SMTP phase=%s outcome=failure elapsed=%.3fs exception=%s retry=%s',
+            phase, elapsed, type(exc).__name__, 'yes' if retryable else 'no',
+        )
+        return (
+            EmailDeliveryResult(
+                EmailDeliveryResult.FAILURE,
+                retryable=retryable,
+                phase=phase,
+                exception_type=type(exc).__name__,
+            ),
+            retryable,
+            phase,
+        )
+
+    @staticmethod
+    def _smtp_ambiguous(start, phase, exc):
+        elapsed = time.monotonic() - start
+        logging.getLogger('studyhub.smtp').warning(
+            'SMTP phase=%s outcome=ambiguous elapsed=%.3fs exception=%s retry=no',
+            phase, elapsed, type(exc).__name__,
+        )
+        return (
+            EmailDeliveryResult(
+                EmailDeliveryResult.AMBIGUOUS,
+                phase=phase,
+                exception_type=type(exc).__name__,
+            ),
+            False,
+            phase,
+        )
 
     @staticmethod
     def send_email(to_email, subject, body):
@@ -377,11 +347,11 @@ class OTPManager:
         ``DATA``) are retried up to ``MAX_SEND_ATTEMPTS`` times with a short
         delay, so brief network hiccups don't permanently block OTP delivery.
         """
-        import logging
         smtp_logger = logging.getLogger('studyhub.smtp')
 
         max_attempts = OTPManager.MAX_SEND_ATTEMPTS
         retry_delay = OTPManager.RETRY_DELAY_SECONDS
+        result = RESULT_FAILURE
 
         for attempt in range(1, max_attempts + 1):
             try:
@@ -394,22 +364,22 @@ class OTPManager:
                 # (e.g. from the finally block's quit()), treat it as a
                 # transient failure and retry rather than crashing.
                 smtp_logger.warning(
-                    'Unexpected exception in _attempt_send: %s',
+                    'SMTP phase=unknown outcome=failure exception=%s retry=no',
                     type(exc).__name__,
                 )
-                if attempt >= max_attempts:
-                    return RESULT_FAILURE
-                time.sleep(retry_delay)
-                continue
+                return EmailDeliveryResult(
+                    EmailDeliveryResult.FAILURE,
+                    exception_type=type(exc).__name__,
+                )
 
             if result.is_success or not can_retry or attempt >= max_attempts:
                 return result
 
-            masked = OTPManager._mask_email_log(to_email)
             smtp_logger.warning(
-                'SMTP send attempt %d/%d failed for %s (phase=%s), '
-                'retrying in %ds',
-                attempt, max_attempts, masked, phase, retry_delay,
+                'SMTP retry attempt=%d/%d phase=%s exception=%s delay=%ds recipient=%s',
+                attempt, max_attempts, phase,
+                result.exception_type or 'unknown', retry_delay,
+                OTPManager._mask_email_log(to_email),
             )
             time.sleep(retry_delay)
 

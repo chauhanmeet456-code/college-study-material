@@ -115,6 +115,32 @@ def _pending_notifications():
     return row
 
 
+def _pending_notification_by_purpose(purpose):
+    """Return the most recent pending notification with the given purpose,
+    or None if no such row exists."""
+    conn = get_connection()
+    cursor = get_cursor(conn)
+    cursor.execute(
+        "SELECT * FROM pending_notifications WHERE purpose = ? "
+        "ORDER BY id DESC LIMIT 1",
+        (purpose,),
+    )
+    row = cursor.fetchone()
+    close_cursor(cursor)
+    conn.close()
+    return row
+
+
+def _count_pending():
+    conn = get_connection()
+    cursor = get_cursor(conn)
+    cursor.execute("SELECT COUNT(*) AS total FROM pending_notifications")
+    row = cursor.fetchone()
+    close_cursor(cursor)
+    conn.close()
+    return row['total'] if row else 0
+
+
 def login_step_one(client, email, password):
     page = client.get('/login')
     token = csrf_from(page.get_data(as_text=True))
@@ -231,7 +257,6 @@ def main():
              user_id + 999, 'test_retry_key', 0, 'failed',
              '2026-01-01 00:00:00', '2026-01-01 00:00:00'),
         )
-        conn.commit()
         close_cursor(cur)
 
     sent_emails.clear()
@@ -258,7 +283,6 @@ def main():
              NotificationService.MAX_ATTEMPTS, 'failed',
              '2026-01-01 00:00:00', '2026-01-01 00:00:00'),
         )
-        conn.commit()
         close_cursor(cur)
 
     sent_emails.clear()
@@ -421,13 +445,16 @@ def main():
                         follow_redirects=False)
     record('deletion redirects after success', r_del.status_code == 302,
            'status=%s' % r_del.status_code)
-    record('self-deletion email sent', len(sent_emails) >= 1,
-           'count=%d' % len(sent_emails))
-    if sent_emails:
-        record('email subject is account_deleted_self',
-               sent_emails[0][1] == TEMPLATES['account_deleted_self']['subject'])
-        record('email body mentions successfully deleted',
-               'successfully deleted' in sent_emails[0][2].lower())
+    # Account-deletion email is now enqueued (not sent synchronously) so the
+    # HTTP request is not blocked by Gmail SMTP.  Verify the job is in the queue.
+    queued = _pending_notification_by_purpose('account_deleted_self')
+    record('self-deletion email queued', queued is not None,
+           'found=%s' % (queued is not None))
+    if queued:
+        record('queued email has correct recipient',
+               queued.get('recipient_email') == email)
+        record('queued email body mentions successfully deleted',
+               'successfully deleted' in queued.get('body', '').lower())
 
     # Restore user for subsequent tests
     with app.app_context():
@@ -453,13 +480,15 @@ def main():
                    data={'csrf_token': tok_admin}, follow_redirects=False)
     record('admin deletion redirects', r.status_code == 302,
            'status=%s' % r.status_code)
-    record('admin-deletion email sent', len(sent_emails) >= 1,
-           'count=%d' % len(sent_emails))
-    if sent_emails:
-        record('email subject is account_deleted_by_admin',
-               sent_emails[0][1] == TEMPLATES['account_deleted_by_admin']['subject'])
-        record('email body mentions administrator',
-               'administrator' in sent_emails[0][2].lower())
+    # Admin-deletion email is now enqueued (not sent synchronously).
+    queued = _pending_notification_by_purpose('account_deleted_by_admin')
+    record('admin-deletion email queued', queued is not None,
+           'found=%s' % (queued is not None))
+    if queued:
+        record('queued email subject is account_deleted_by_admin',
+               queued.get('subject') == TEMPLATES['account_deleted_by_admin']['subject'])
+        record('queued email body mentions administrator',
+               'administrator' in queued.get('body', '').lower())
 
     # Restore user
     with app.app_context():

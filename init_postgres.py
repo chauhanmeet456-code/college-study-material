@@ -200,7 +200,11 @@ CREATE TABLE IF NOT EXISTS pending_notifications (
     attempt INTEGER DEFAULT 0,
     status VARCHAR(20) DEFAULT 'pending',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    last_attempt_at TIMESTAMP DEFAULT NULL
+    last_attempt_at TIMESTAMP DEFAULT NULL,
+    retryable INTEGER DEFAULT 1,
+    next_attempt_at TIMESTAMP DEFAULT NULL,
+    claimed_at TIMESTAMP DEFAULT NULL,
+    last_error VARCHAR(100) DEFAULT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_pending_notif_dedupe ON pending_notifications(dedupe_key, status);
 CREATE INDEX IF NOT EXISTS idx_pending_notif_status ON pending_notifications(status, created_at);

@@ -462,26 +462,40 @@ def delete_user(user_id):
     user_email = user.get('email') or ''
     deleted = False
     if user.get('deleted_by_user') == 1 and user.get('deletion_processed') is not None:
-        deleted = User.permanent_delete(user_id)
+        with immediate_transaction() as conn:
+            deleted = User.permanent_delete(user_id, conn=conn)
+            # Enqueue the account-deletion notification transactionally: if the
+            # enqueue fails (e.g. DB error) the whole transaction rolls back and
+            # the deletion is not committed — preventing an orphaned user with
+            # no notification queued.  SMTP delivery itself is deferred to the
+            # background worker, so the HTTP request is not blocked.
+            if deleted and user_email:
+                from utils.notifications import queue_template_notification
+                queue_template_notification(
+                    'account_deleted_by_admin',
+                    user_email,
+                    related_id=user_id,
+                    dedupe_key='account_deleted_by_admin:%d' % user_id,
+                    conn=conn,
+                )
         if deleted:
             flash('User permanently deleted from database.', 'success')
     else:
-        User.mark_deletion_processed(user_id)
-        deleted = User.delete(user_id)
+        with immediate_transaction() as conn:
+            User.mark_deletion_processed(user_id, conn=conn)
+            deleted = User.delete(user_id, conn=conn)
+            # Same transactional enqueue as above.
+            if deleted and user_email:
+                from utils.notifications import queue_template_notification
+                queue_template_notification(
+                    'account_deleted_by_admin',
+                    user_email,
+                    related_id=user_id,
+                    dedupe_key='account_deleted_by_admin:%d' % user_id,
+                    conn=conn,
+                )
         if deleted:
             flash('User deletion processed successfully!', 'success')
-    # Send notification email only after successful deletion.
-    if deleted and user_email:
-        try:
-            from utils.notifications import send_template_notification
-            send_template_notification(
-                'account_deleted_by_admin',
-                user_email,
-                related_id=user_id,
-                dedupe_key='account_deleted_by_admin:%d' % user_id,
-            )
-        except Exception:
-            pass
     return redirect(next_url)
 
 @admin_bp.route('/messages')

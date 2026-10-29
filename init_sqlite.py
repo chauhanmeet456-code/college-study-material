@@ -194,7 +194,11 @@ def init_sqlite():
             attempt INTEGER DEFAULT 0,
             status VARCHAR(20) DEFAULT 'pending',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            last_attempt_at DATETIME DEFAULT NULL
+            last_attempt_at DATETIME DEFAULT NULL,
+            retryable INTEGER DEFAULT 1,
+            next_attempt_at DATETIME DEFAULT NULL,
+            claimed_at DATETIME DEFAULT NULL,
+            last_error VARCHAR(100) DEFAULT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_pending_notif_dedupe ON pending_notifications(dedupe_key, status);
         CREATE INDEX IF NOT EXISTS idx_pending_notif_status ON pending_notifications(status, created_at);
@@ -302,6 +306,20 @@ def init_sqlite():
     ):
         try:
             cursor.execute(f"ALTER TABLE user_sessions ADD COLUMN {column} {dtype}")
+        except sqlite3.OperationalError:
+            pass
+
+    for column, dtype in (
+        ('retryable', "INTEGER DEFAULT 1"),
+        ('next_attempt_at', "DATETIME DEFAULT NULL"),
+        ('claimed_at', "DATETIME DEFAULT NULL"),
+        ('last_error', "VARCHAR(100) DEFAULT NULL"),
+    ):
+        try:
+            cursor.execute(
+                "ALTER TABLE pending_notifications ADD COLUMN %s %s"
+                % (column, dtype)
+            )
         except sqlite3.OperationalError:
             pass
 

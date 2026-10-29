@@ -130,35 +130,40 @@ class User:
             conn.close()
 
     @staticmethod
-    def delete(user_id):
-        conn = get_connection()
+    def delete(user_id, conn=None):
+        own_conn = conn is None
+        if own_conn:
+            conn = get_connection()
         cursor = None
         try:
             cursor = get_cursor(conn)
             cursor.execute("UPDATE users SET is_active = 0, deleted_by_user = 1, deletion_requested_at = ? WHERE id = ?", (datetime.now(), user_id))
-            conn.commit()
-            # In SQLite, rowcount is unreliable for UPDATE (returns 0 on success).
-            # PostgreSQL returns the correct count.  Treat the operation as
-            # successful if no exception was raised.
+            if own_conn:
+                conn.commit()
             rc = cursor.rowcount
-            return rc > 0 if rc != -1 and rc != 0 else True
+            return rc > 0 if rc >= 0 else True
         finally:
             close_cursor(cursor)
-            conn.close()
+            if own_conn:
+                conn.close()
     
     @staticmethod
-    def permanent_delete(user_id):
-        conn = get_connection()
+    def permanent_delete(user_id, conn=None):
+        own_conn = conn is None
+        if own_conn:
+            conn = get_connection()
         cursor = None
         try:
             cursor = get_cursor(conn)
             cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
-            conn.commit()
+            if own_conn:
+                conn.commit()
             rc = cursor.rowcount
             return rc > 0 if rc != -1 else True
         finally:
             close_cursor(cursor)
-            conn.close()
+            if own_conn:
+                conn.close()
     
     @staticmethod
     def get_deleted_users(search='', page=1, per_page=10):
@@ -238,16 +243,20 @@ class User:
             conn.close()
     
     @staticmethod
-    def mark_deletion_processed(user_id):
-        conn = get_connection()
+    def mark_deletion_processed(user_id, conn=None):
+        own_conn = conn is None
+        if own_conn:
+            conn = get_connection()
         cursor = None
         try:
             cursor = get_cursor(conn)
             cursor.execute("UPDATE users SET deletion_processed = ? WHERE id = ?", (datetime.now(), user_id))
-            conn.commit()
+            if own_conn:
+                conn.commit()
         finally:
             close_cursor(cursor)
-            conn.close()
+            if own_conn:
+                conn.close()
     
     @staticmethod
     def has_deletion_request(user_id):

@@ -1,6 +1,7 @@
 import os
 import time
 import threading
+import logging
 from contextlib import contextmanager
 from datetime import datetime, date
 from config import Config
@@ -37,6 +38,7 @@ sqlite3.register_adapter(date, _adapt_datetime)
 
 _tls = threading.local()
 _pg_lock = threading.Lock()
+_transaction_logger = logging.getLogger("studyhub.database")
 
 
 def dict_factory(cursor, row):
@@ -339,8 +341,11 @@ def immediate_transaction():
     except Exception:
         try:
             _rollback_transaction(conn, started, dialect)
-        except Exception:
-            pass
+        except Exception as cleanup_error:
+            _transaction_logger.warning(
+                "Transaction rollback failed (%s)",
+                type(cleanup_error).__name__,
+            )
         raise
     finally:
         if dialect == "sqlite":
@@ -355,15 +360,17 @@ def immediate_transaction():
 
 
 def _commit_transaction(conn, started, dialect=None):
-    """Commit safely. A caller that already committed must not break us."""
+    """Commit only a transaction owned by this context manager."""
     if dialect is None:
         dialect = _dialect(conn)
     if dialect == "sqlite":
-        try:
-            conn.execute("COMMIT")
-        except sqlite3.OperationalError as exc:
-            if "no transaction" not in str(exc).lower():
-                raise
+        if not started:
+            return
+        if not conn.in_transaction:
+            raise RuntimeError(
+                "SQLite transaction ended before its owning context committed"
+            )
+        conn.execute("COMMIT")
     else:
         conn.commit()
 
@@ -372,13 +379,9 @@ def _rollback_transaction(conn, started, dialect=None):
     if dialect is None:
         dialect = _dialect(conn)
     if dialect == "sqlite":
-        if not started:
+        if not started or not conn.in_transaction:
             return
-        try:
-            conn.execute("ROLLBACK")
-        except sqlite3.OperationalError as exc:
-            if "no transaction" not in str(exc).lower():
-                raise
+        conn.execute("ROLLBACK")
     else:
         conn.rollback()
 
@@ -394,8 +397,7 @@ def process_in_transaction(callback):
 # ---------------------------------------------------------------------------
 # These migrations are strictly additive. They add a column that lets the
 # session layer distinguish an administrator-ended session from an ordinary
-# revocation, and a tiny table that backs the durable notification queue used
-# for account-deletion and session-termination emails.
+# revocation, and the durable account-deletion notification queue.
 #
 # They are safe to run repeatedly: every statement first checks whether the
 # column / table already exists, so running them on a database that is already
@@ -443,6 +445,12 @@ def _has_table(conn, table):
 
 
 def _dialect(conn):
+    if isinstance(conn, sqlite3.Connection):
+        return "sqlite"
+    if isinstance(conn, PooledConnection):
+        return "postgres"
+    if isinstance(conn, pymysql.connections.Connection):
+        return "mysql"
     try:
         if Config.USE_POSTGRES:
             return "postgres"
@@ -486,6 +494,23 @@ def ensure_schema_extensions():
             if not _has_table(conn, "pending_notifications"):
                 _notif.create_pending_notifications_table(conn, dialect)
                 changed = True
+            queue_columns = (
+                ("retryable", "INTEGER DEFAULT 1"),
+                ("next_attempt_at", "TIMESTAMP DEFAULT NULL"),
+                ("claimed_at", "TIMESTAMP DEFAULT NULL"),
+                ("last_error", "VARCHAR(100) DEFAULT NULL"),
+            )
+            for column, definition in queue_columns:
+                if not _has_column(conn, "pending_notifications", column):
+                    try:
+                        conn.execute(
+                            "ALTER TABLE pending_notifications ADD COLUMN "
+                            + column + " " + definition
+                        )
+                        changed = True
+                    except Exception as exc:
+                        if "duplicate column" not in str(exc).lower():
+                            errors.append(type(exc).__name__)
             if changed:
                 conn.commit()
         finally:

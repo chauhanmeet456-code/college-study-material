@@ -17,6 +17,7 @@ from models.session import (
     hash_session_token,
 )
 from models.user import User
+from utils.database import immediate_transaction
 from utils.decorators import user_required
 from utils.auth import get_current_user
 from utils.device import get_request_device_info
@@ -110,17 +111,41 @@ def delete_account():
         flash('Incorrect password. Please try again.', 'danger')
         return redirect(url_for('user.profile'))
     
+    if not OTPManager.is_configured():
+        flash(
+            "We couldn't send the verification code. Please try again later.",
+            'danger',
+        )
+        return redirect(url_for('user.profile'))
+
     otp_code = OTPManager.generate_otp()
     OTPManager.store_otp(user['email'], otp_code, 'delete_account')
-    
-    if Config.MAIL_USERNAME and Config.MAIL_PASSWORD:
-        OTPManager.send_otp_email(user['email'], otp_code, 'delete_account')
-    
+    delivery = OTPManager.send_otp_email(
+        user['email'], otp_code, 'delete_account',
+    )
+    if delivery.is_failure:
+        session.pop('otp_delete_account_%s' % user['email'], None)
+        flash(
+            "We couldn't send the verification code. Please try again later.",
+            'danger',
+        )
+        return redirect(url_for('user.profile'))
+
     session['delete_account_email'] = user['email']
     session.pop('user_id', None)
     session.pop('user_name', None)
     session.permanent = True
-    flash('OTP sent to your email. Please verify to confirm account deletion.', 'warning')
+    if delivery.is_ambiguous:
+        flash(
+            'The verification code may have been sent. Check your inbox before '
+            'continuing to confirm account deletion.',
+            'warning',
+        )
+    else:
+        flash(
+            'OTP sent to your email. Please verify to confirm account deletion.',
+            'warning',
+        )
     return redirect(url_for('user.confirm_delete_account'))
 
 @user_bp.route('/profile/confirm-delete-account', methods=['GET', 'POST'])
@@ -142,32 +167,60 @@ def confirm_delete_account():
             user = User.get_by_email(email)
             if user:
                 user_id = user['id']
-                session.clear()
-                deleted = User.delete(user_id)
-                # Send confirmation email only after the deletion is committed.
-                email_sent = False
-                if deleted:
-                    try:
-                        from utils.notifications import send_template_notification
-                        result = send_template_notification(
+                deleted = False
+                notification_result = None
+                # Transactional: delete user AND enqueue notification together.
+                # SMTP delivery is deferred to the background worker, so the
+                # HTTP response is not blocked by Gmail delays.
+                with immediate_transaction() as conn:
+                    deleted = User.delete(user_id, conn=conn)
+                    if deleted:
+                        from utils.notifications import (
+                            NotificationService, queue_template_notification,
+                        )
+                        result = queue_template_notification(
                             'account_deleted_self',
                             user['email'],
                             related_id=user_id,
                             dedupe_key='account_deleted_self:%d' % user_id,
+                            conn=conn,
                         )
-                        email_sent = result != 'not_configured' and result != 'queued'
-                    except Exception:
-                        pass
-                if not email_sent:
+                        notification_result = result
+                if deleted:
+                    session.clear()
+                if not deleted:
+                    flash(
+                        'Your account could not be deleted. Please contact support.',
+                        'danger',
+                    )
+                elif notification_result == NotificationService.RESULT_QUEUED:
                     flash(
                         'Your account has been deleted successfully. '
-                        'However, we could not send the confirmation email to '
-                        + user['email'] + '. '
-                        'If you did not receive it, please contact support.',
+                        'A confirmation email has been queued for delivery.',
+                        'success',
+                    )
+                elif notification_result == NotificationService.RESULT_AMBIGUOUS:
+                    flash(
+                        'Your account has been deleted successfully. The '
+                        'confirmation email may already have been delivered; '
+                        'please check your inbox.',
                         'warning',
                     )
+                elif notification_result == NotificationService.RESULT_SKIPPED:
+                    flash(
+                        'Your account has been deleted successfully. The '
+                        'confirmation notification was already recorded.',
+                        'success',
+                    )
                 else:
-                    flash('Your account has been deleted successfully.', 'success')
+                    flash(
+                        'Your account has been deleted successfully. '
+                        'However, we could not queue the confirmation email to '
+                        + user['email'] + '. '
+                        'If you did not receive it within a few minutes, '
+                        'please contact support.',
+                        'warning',
+                    )
                 return redirect(url_for('main.index'))
             else:
                 flash('User not found.', 'danger')
