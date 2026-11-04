@@ -236,7 +236,7 @@ python init_sqlite.py
 python init_postgres.py
 ```
 
-If you have existing data in SQLite and want to migrate it to PostgreSQL, see the [Database Setup Guide](DATABASE_SETUP.md).
+If you have existing data in SQLite and want to migrate it to PostgreSQL, see the [Database Setup Guide](docs/DATABASE_SETUP.md).
 
 ### Step 6: Run Application
 
@@ -307,7 +307,7 @@ The database abstraction layer (`utils/database.py`) handles:
 - Row factory abstraction (dict-based for all backends)
 - Transaction management (`BEGIN IMMEDIATE` for SQLite, standard transactions for PostgreSQL/MySQL)
 
-See [DATABASE_SETUP.md](DATABASE_SETUP.md) for detailed database configuration.
+See [DATABASE_SETUP.md](docs/DATABASE_SETUP.md) for detailed database configuration.
 
 ## Admin Features
 
@@ -416,7 +416,7 @@ python tests/tests_session_management.py
 python tests/tests_session_edge_cases.py
 ```
 
-See [TESTING.md](TESTING.md) for detailed test documentation and results.
+See [TESTING.md](docs/TESTING.md) for detailed test documentation and results.
 
 ## License
 
