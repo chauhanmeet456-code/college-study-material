@@ -8,6 +8,13 @@ from utils.database import get_connection, get_cursor, close_cursor
 from utils.security import csrf_protect
 from config import Config
 import os
+import re
+from flask import current_app
+from utils.cookie_consent import (
+    COOKIE_NAME,
+    MAX_AGE as COOKIE_CONSENT_MAX_AGE,
+    serialize_cookie_preferences,
+)
 
 main_bp = Blueprint('main', __name__)
 
@@ -29,11 +36,12 @@ def api_toggle_favorite(material_id):
 @main_bp.route('/api/search/suggestions')
 def api_search_suggestions():
     query = request.args.get('q', '').strip()
+    if len(query) > 100 or re.search(r'[\x00-\x1f\x7f]', query):
+        return jsonify({'suggestions': [], 'message': 'Invalid search query.'}), 400
     if len(query) < 2:
         return jsonify({'suggestions': []})
-    
-    materials, _ = Material.get_all(filters={'search': query}, sort='latest', page=1, per_page=8)
-    suggestions = [m['title'] for m in materials if m.get('title')]
+
+    suggestions = Material.search_suggestions(query, limit=8)
     return jsonify({'suggestions': suggestions})
 
 @main_bp.route('/api/search')
@@ -102,7 +110,12 @@ def index():
                            featured_materials=featured_materials, announcements=announcements,
                            total_subjects=total_subjects, total_materials=total_materials,
                            total_notes=total_notes, total_students=total_students,
-                           current_user=get_current_user())
+                           current_user=get_current_user(),
+                           meta_title='StudyHub - 3rd Year Study Materials',
+                           meta_description=(
+                               'Access notes, assignments, books, practicals, '
+                               'question papers and more for your course.'
+                           ))
 
 @main_bp.route('/subjects')
 def subjects():
@@ -126,7 +139,13 @@ def subjects():
     else:
         # No subjects, so no need to query
         pass
-    return render_template('subjects.html', subjects=all_subjects, current_user=get_current_user())
+    return render_template(
+        'subjects.html',
+        subjects=all_subjects,
+        current_user=get_current_user(),
+        meta_title='Subjects - StudyHub',
+        meta_description='Browse StudyHub subjects and find relevant course materials.',
+    )
 
 @main_bp.route('/subject/<int:subject_id>')
 def subject_details(subject_id):
@@ -145,7 +164,14 @@ def subject_details(subject_id):
     materials, total = Material.get_by_subject(subject_id, category_id=cat_id, page=page, per_page=12)
     return render_template('subject_details.html', subject=subject, categories=categories,
                            materials=materials, total=total, page=page, current_category=category_filter,
-                           current_user=get_current_user())
+                           current_user=get_current_user(),
+                           meta_title='{} - StudyHub'.format(subject['name']),
+                           meta_description=(
+                               subject.get('description')
+                               or 'Browse notes, assignments, books, and other materials for {}.'.format(
+                                   subject['name']
+                               )
+                           ))
 
 @main_bp.route('/material/<int:material_id>')
 def material_details(material_id):
@@ -172,7 +198,13 @@ def material_details(material_id):
     from utils.helpers import is_video_file
     is_video = is_video_file(material.get('file_name', ''))
     return render_template('material_details.html', material=material, subject=subject, current_user=current_user,
-                           remaining_views=remaining_views, remaining_downloads=remaining_downloads, is_video=is_video)
+                           remaining_views=remaining_views, remaining_downloads=remaining_downloads, is_video=is_video,
+                           meta_title='{} - StudyHub'.format(material['title']),
+                           meta_description=(
+                               material.get('description')
+                               or 'View this study material on StudyHub.'
+                           ),
+                           meta_type='article')
 
 @main_bp.route('/material/<int:material_id>/view')
 def view_material(material_id):
@@ -328,6 +360,47 @@ def search():
 @main_bp.route('/about')
 def about():
     return render_template('about.html', current_user=get_current_user())
+
+@main_bp.route('/cookie-policy')
+def cookie_policy():
+    return render_template('cookie_policy.html', current_user=get_current_user())
+
+@main_bp.route('/api/cookie-consent', methods=['POST'])
+@csrf_protect
+def save_cookie_consent():
+    data = request.get_json(silent=True) or request.form
+    choice = data.get('choice', '')
+    if choice == 'accept':
+        preferences = {'preferences': True}
+    elif choice == 'reject':
+        preferences = {'preferences': False}
+    elif choice == 'settings':
+        preferences_value = data.get('preferences', False)
+        if isinstance(preferences_value, str):
+            normalized = preferences_value.lower()
+            if normalized not in ('true', 'false', '1', '0', 'on', 'off', ''):
+                return jsonify({'success': False, 'message': 'Invalid preference value.'}), 400
+            preferences_value = normalized in ('true', '1', 'on')
+        elif not isinstance(preferences_value, bool):
+            return jsonify({'success': False, 'message': 'Invalid preference value.'}), 400
+        preferences = {'preferences': preferences_value}
+    else:
+        return jsonify({'success': False, 'message': 'Invalid consent choice.'}), 400
+
+    response = jsonify({
+        'success': True,
+        'preferences': {'necessary': True, **preferences},
+    })
+    response.set_cookie(
+        COOKIE_NAME,
+        serialize_cookie_preferences(preferences),
+        max_age=COOKIE_CONSENT_MAX_AGE,
+        httponly=True,
+        secure=current_app.config.get('SESSION_COOKIE_SECURE', False),
+        samesite='Lax',
+        path='/',
+    )
+    return response
 
 @main_bp.route('/contact', methods=['GET', 'POST'])
 @csrf_protect

@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 
 from flask import (
     Blueprint,
+    current_app,
     flash,
     redirect,
     render_template,
@@ -12,6 +13,7 @@ from flask import (
 
 import logging
 import re
+from collections.abc import Mapping
 
 from config import Config
 from models.session import (
@@ -22,9 +24,11 @@ from models.session import (
     hash_session_token,
 )
 from models.user import User
+from models.oauth_account import OAuthAccount
 from utils.auth import get_current_user
 from utils.device import get_request_device_info
 from utils.database import immediate_transaction
+from utils.google_oauth import google_callback_uri
 from utils.otp import OTPManager, EmailDeliveryResult
 from utils.security import (
     check_login_rate_limit,
@@ -69,6 +73,7 @@ LOGIN_RATE_SCOPE = 'login'
 # exists.  The plain password is never stored here or anywhere else.
 PENDING_LOGIN_EMAIL = 'pending_login_email'
 LOGIN_VERIFIED_USER = 'login_verified_user_id'
+VERIFIED_LOGIN_METHOD = 'verified_login_method'
 
 
 def _now():
@@ -91,8 +96,97 @@ def _client_ip():
 def _clear_login_state():
     session.pop(PENDING_LOGIN_EMAIL, None)
     session.pop(LOGIN_VERIFIED_USER, None)
+    session.pop(VERIFIED_LOGIN_METHOD, None)
     session.pop('login_email', None)
     session.pop('login_password', None)
+
+
+@auth_bp.route('/google')
+def google_login():
+    google = current_app.extensions.get('google_oauth_client')
+    if not google:
+        flash('Google sign-in is not configured. Please use email and password.', 'warning')
+        return redirect(url_for('auth.login'))
+
+    callback_uri = google_callback_uri()
+    if not callback_uri:
+        flash('Google sign-in requires a valid HTTPS public URL.', 'warning')
+        return redirect(url_for('auth.login'))
+
+    return google.authorize_redirect(callback_uri)
+
+
+@auth_bp.route('/google/callback')
+def google_callback():
+    google = current_app.extensions.get('google_oauth_client')
+    if not google:
+        flash('Google sign-in is not configured. Please use email and password.', 'warning')
+        return redirect(url_for('auth.login'))
+
+    try:
+        token = google.authorize_access_token()
+        profile = token.get('userinfo') or google.userinfo()
+    except Exception as exc:
+        logger.warning('Google OAuth callback failed (%s)', type(exc).__name__)
+        flash('Google sign-in could not be completed. Please try again.', 'danger')
+        return redirect(url_for('auth.login'))
+
+    if not isinstance(profile, Mapping):
+        flash('Google did not return a valid account profile.', 'danger')
+        return redirect(url_for('auth.login'))
+
+    email = str(profile.get('email') or '').strip().lower()
+    provider_subject = str(profile.get('sub') or '').strip()
+    if (
+        profile.get('email_verified') is not True
+        or len(email) > 254
+        or not re.fullmatch(r'[^@\s]+@[^@\s]+\.[^@\s]+', email)
+        or not provider_subject
+        or len(provider_subject) > 255
+    ):
+        flash('Google must provide a verified email address to sign in.', 'danger')
+        return redirect(url_for('auth.login'))
+
+    try:
+        user = OAuthAccount.get_user(OAuthAccount.PROVIDER_GOOGLE, provider_subject)
+        if not user:
+            user = OAuthAccount.get_user_by_email(email)
+            if user:
+                if user.get('deleted_by_user') or not user.get('is_active', 1):
+                    flash('This account is unavailable. Please contact StudyHub support.', 'warning')
+                    return redirect(url_for('auth.login'))
+                OAuthAccount.link_user(
+                    user['id'], OAuthAccount.PROVIDER_GOOGLE, provider_subject,
+                )
+            else:
+                display_name = re.sub(
+                    r'[\x00-\x1f\x7f]', '', str(profile.get('name') or ''),
+                ).strip()[:100] or email.split('@', 1)[0][:100]
+                user = OAuthAccount.create_google_user(
+                    display_name, email, provider_subject,
+                )
+    except Exception as exc:
+        logger.warning('Google account lookup/link failed (%s)', type(exc).__name__)
+        flash('Google sign-in could not be completed. Please try again.', 'danger')
+        return redirect(url_for('auth.login'))
+
+    if not user or user.get('deleted_by_user') or not user.get('is_active', 1):
+        flash('This account is unavailable. Please contact StudyHub support.', 'warning')
+        return redirect(url_for('auth.login'))
+
+    conflicts = _active_sessions_other_than(user['id'])
+    if conflicts:
+        session[LOGIN_VERIFIED_USER] = user['id']
+        session[VERIFIED_LOGIN_METHOD] = 'google'
+        return render_template(
+            'auth/login.html',
+            current_user=get_current_user(),
+            show_otp=False,
+            conflict=True,
+            conflict_sessions=conflicts,
+        )
+
+    return _complete_login(user, login_method='google')
 
 
 def _clear_pending_otp(email, purpose):
@@ -471,10 +565,13 @@ def _handle_replace_choice():
         flash('Session expired. Please login again.', 'warning')
         return redirect(url_for('auth.login'))
 
-    return _complete_login(user)
+    return _complete_login(
+        user,
+        login_method=session.get(VERIFIED_LOGIN_METHOD, 'password_otp'),
+    )
 
 
-def _complete_login(user):
+def _complete_login(user, login_method='password_otp'):
     """Create the authenticated server side session for this device.
 
     The old session is revoked inside the same transaction that creates the
@@ -509,7 +606,7 @@ def _complete_login(user):
                         LoginHistory.EVENT_SESSION_REPLACED,
                         device_description=device_name,
                         ip_address=ip,
-                        login_method='password_otp',
+                        login_method=login_method,
                         result=LoginHistory.RESULT_INFO,
                         related_session_id=row['id'],
                     )
@@ -531,7 +628,7 @@ def _complete_login(user):
                 LoginHistory.EVENT_LOGIN_SUCCESS,
                 device_description=device_name,
                 ip_address=ip,
-                login_method='password_otp',
+                login_method=login_method,
                 result=LoginHistory.RESULT_SUCCESS,
                 related_session_id=session_row_id,
             )

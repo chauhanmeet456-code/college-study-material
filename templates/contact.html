@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Contact Us - StudyHub{% endblock %}
+{% block favicon %}
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicons/favicon-contact.svg') }}">
+{% endblock %}
 {% block extra_css %}
 <style>
     .contact-info-card {

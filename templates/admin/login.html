@@ -527,8 +527,9 @@
         const toggleBtn = document.getElementById("darkModeToggle");
         const icon = document.getElementById("darkModeIcon");
         const body = document.body;
-        const stored = localStorage.getItem("darkMode");
-        if (stored === "true") {
+        const preferencesEnabled = body.dataset.preferencesEnabled === "true";
+        const stored = preferencesEnabled ? localStorage.getItem("darkMode") : null;
+        if (preferencesEnabled && stored === "true") {
           body.classList.add("dark-mode");
           icon.className = "fas fa-sun";
           document.documentElement.setAttribute("data-bs-theme", "dark");
@@ -536,7 +537,7 @@
         toggleBtn.addEventListener("click", function () {
           body.classList.toggle("dark-mode");
           const isDark = body.classList.contains("dark-mode");
-           localStorage.setItem("darkMode", String(isDark));
+           if (preferencesEnabled) localStorage.setItem("darkMode", String(isDark));
           icon.className = isDark ? "fas fa-sun" : "fas fa-moon";
           document.documentElement.setAttribute(
             "data-bs-theme",

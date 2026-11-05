@@ -14,7 +14,56 @@ class Material:
                 (title, description, subject_id, category_id, file_name, file_path, file_type, file_size, uploaded_by, is_featured, is_active)
             )
             conn.commit()
-            return cursor.lastrowid
+            material_id = cursor.lastrowid
+        finally:
+            close_cursor(cursor)
+            conn.close()
+        if is_active:
+            from models.notification import notify_material_published
+            notify_material_published(material_id)
+        return material_id
+
+    @staticmethod
+    def search_suggestions(query, limit=8):
+        conn = get_connection()
+        cursor = None
+        try:
+            cursor = get_cursor(conn)
+            escaped = query.replace('!', '!!').replace('%', '!%').replace('_', '!_')
+            pattern = '%{}%'.format(escaped)
+            cursor.execute(
+                "SELECT m.id, m.title, c.name AS category_name, s.name AS subject_name "
+                "FROM materials m "
+                "JOIN categories c ON c.id = m.category_id "
+                "JOIN subjects s ON s.id = m.subject_id "
+                "WHERE m.is_active = 1 AND "
+                "(m.title LIKE ? ESCAPE '!' OR m.description LIKE ? ESCAPE '!') "
+                "AND s.is_active = 1 "
+                "ORDER BY m.uploaded_at DESC LIMIT ?",
+                (pattern, pattern, limit),
+            )
+            materials = cursor.fetchall()
+            cursor.execute(
+                "SELECT id, name FROM subjects WHERE is_active = 1 "
+                "AND name LIKE ? ESCAPE '!' ORDER BY name ASC LIMIT ?",
+                (pattern, limit),
+            )
+            subjects = cursor.fetchall()
+            results = [
+                {
+                    'title': material['title'],
+                    'type': material['category_name'],
+                    'subtitle': material['subject_name'],
+                    'url': '/material/{}'.format(material['id']),
+                }
+                for material in materials
+            ]
+            results.extend({
+                'title': subject['name'],
+                'type': 'Subject',
+                'url': '/subject/{}'.format(subject['id']),
+            } for subject in subjects)
+            return results[:limit]
         finally:
             close_cursor(cursor)
             conn.close()
@@ -200,25 +249,35 @@ class Material:
 
     @staticmethod
     def update(material_id, **kwargs):
+        allowed = ['title', 'description', 'subject_id', 'category_id', 'is_featured', 'is_active']
+        fields = [
+            (key, value) for key, value in kwargs.items()
+            if key in allowed
+        ]
+        if not fields:
+            return
         conn = get_connection()
         cursor = None
+        was_active = False
         try:
-            allowed = ['title', 'description', 'subject_id', 'category_id', 'is_featured', 'is_active']
-            fields = []
-            values = []
-            for key, value in kwargs.items():
-                if key in allowed:
-                    fields.append(f"{key} = ?")
-                    values.append(value)
-            if not fields:
-                return
-            values.append(material_id)
             cursor = get_cursor(conn)
-            cursor.execute(f"UPDATE materials SET {', '.join(fields)} WHERE id = ?", values)
+            cursor.execute("SELECT is_active FROM materials WHERE id = ?", (material_id,))
+            existing = cursor.fetchone()
+            was_active = bool(existing and existing.get('is_active'))
+            values = []
+            update_fields = []
+            for key, value in fields:
+                update_fields.append(f"{key} = ?")
+                values.append(value)
+            values.append(material_id)
+            cursor.execute(f"UPDATE materials SET {', '.join(update_fields)} WHERE id = ?", values)
             conn.commit()
         finally:
             close_cursor(cursor)
             conn.close()
+        if not was_active and kwargs.get('is_active'):
+            from models.notification import notify_material_published
+            notify_material_published(material_id)
 
     @staticmethod
     def update_file(material_id, file_name, file_path, file_type, file_size):

@@ -1,0 +1,47 @@
+{% if cookie_preferences is none %}
+<section class="cookie-banner card" id="cookieConsentBanner" role="region" aria-label="Cookie consent">
+    <div class="card-body">
+        <h2 class="h6 fw-bold">Your cookie choices</h2>
+        <p class="small mb-3">Necessary cookies support authentication, sessions, and security and are always enabled. Optional preference storage (such as remembering dark mode) is off unless you choose to allow it. StudyHub does not use advertising or analytics cookies.</p>
+        <div class="d-flex flex-wrap gap-2">
+            <button class="btn btn-primary btn-sm" type="button" data-cookie-choice="accept">Accept All</button>
+            <button class="btn btn-outline-secondary btn-sm" type="button" data-cookie-choice="reject">Reject Optional Cookies</button>
+            <button class="btn btn-link btn-sm" type="button" data-cookie-settings>Cookie Settings</button>
+        </div>
+        <p class="small text-danger mt-2 mb-0" id="cookieConsentStatus" role="status" aria-live="polite"></p>
+        <div class="small mt-2">
+            <a href="{{ url_for('main.cookie_policy') }}">Cookie Policy</a>
+            <a href="#cookie-settings" class="ms-3">Cookie Preferences</a>
+        </div>
+    </div>
+</section>
+{% endif %}
+
+<div class="modal fade" id="cookieSettingsModal" tabindex="-1" aria-labelledby="cookieSettingsTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title fs-5" id="cookieSettingsTitle">Cookie Settings</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Necessary cookies are always enabled for authentication, sessions, and security. No analytics, advertising, or tracking cookies are set by StudyHub.</p>
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="necessaryCookies" checked disabled>
+                    <label class="form-check-label" for="necessaryCookies">Necessary (always on)</label>
+                </div>
+                <div class="form-check form-switch mt-3">
+                    <input class="form-check-input" type="checkbox" id="preferenceCookies"
+                           {% if cookie_preferences and cookie_preferences.preferences %}checked{% endif %}>
+                    <label class="form-check-label" for="preferenceCookies">Optional preferences (remember display preferences)</label>
+                </div>
+                <p class="small text-muted mt-3 mb-0">Changing this choice takes effect immediately. See our <a href="{{ url_for('main.cookie_policy') }}">Cookie Policy</a>.</p>
+                <p class="small text-danger mb-0" id="cookieSettingsStatus" role="status" aria-live="polite"></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="saveCookieSettings">Save preferences</button>
+            </div>
+        </div>
+    </div>
+</div>

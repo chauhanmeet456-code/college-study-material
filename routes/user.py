@@ -24,9 +24,54 @@ from utils.device import get_request_device_info
 from utils.helpers import allowed_image_file, generate_safe_filename
 from utils.otp import OTPManager
 from utils.security import csrf_protect
+from models.notification import Notification
 import os
 
 user_bp = Blueprint('user', __name__)
+
+
+@user_bp.route('/notifications')
+@user_required
+def notifications_page():
+    notifications, unread_count = Notification.get_for_user(session['user_id'], limit=100)
+    return render_template(
+        'user/notifications.html',
+        notifications=notifications,
+        unread_count=unread_count,
+        current_user=get_current_user(),
+    )
+
+
+@user_bp.route('/api/notifications')
+def notifications_api():
+    user = get_current_user()
+    if not user:
+        return jsonify({'success': False, 'message': 'Authentication required.'}), 401
+    notifications, unread_count = Notification.get_for_user(user['id'])
+    return jsonify({
+        'success': True,
+        'notifications': notifications,
+        'unread_count': unread_count,
+    })
+
+
+@user_bp.route('/api/notifications/<int:notification_id>/read', methods=['POST'])
+@user_required
+@csrf_protect
+def mark_notification_read(notification_id):
+    marked = Notification.mark_read(session['user_id'], notification_id)
+    if not marked:
+        return jsonify({'success': False, 'message': 'Notification not found.'}), 404
+    _, unread_count = Notification.get_for_user(session['user_id'], limit=1)
+    return jsonify({'success': True, 'unread_count': unread_count})
+
+
+@user_bp.route('/api/notifications/read-all', methods=['POST'])
+@user_required
+@csrf_protect
+def mark_all_notifications_read():
+    Notification.mark_all_read(session['user_id'])
+    return jsonify({'success': True, 'unread_count': 0})
 
 
 @user_bp.route('/profile')

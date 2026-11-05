@@ -5,18 +5,23 @@ Supports SQLite (development), PostgreSQL/NeonDB (production), and MySQL.
 
 ## Features
 
-- **Student Portal**: Register, login, browse subjects, search materials, view PDFs/DOCX/PPTX/TXT, download files, bookmark favorites, manage profile
+- **Student Portal**: Register, login, browse subjects, live search suggestions, view materials, download files, bookmark favorites, manage profile, and receive persistent real-time notifications
 - **Admin Panel**: Complete dashboard with subject management, material upload/management, user management, contact messages, announcements, categories, and statistics
 - **Database-Driven**: All subjects, materials, and categories managed from Admin Panel
 - **Multi-Database Support**: SQLite (default for development), PostgreSQL/NeonDB (recommended for production), MySQL
 - **Responsive Design**: Works on mobile, tablet, and desktop with dark mode support
+- **Announcements**: Admin-published announcements are persisted as private user notifications and delivered in real time
+- **Cookie consent**: Necessary session/security cookies remain enabled; optional display preferences are opt-in
+- **Social previews**: Public pages include page-aware Open Graph and Twitter/X metadata with a configurable canonical HTTPS origin
+- **Google sign-in**: Optional Google OpenID Connect login and registration using verified email claims and the existing server-side session policy
 - **Secure**: Password hashing, session management, file upload validation, environment variables for credentials
 
 ## Technology Stack
 
 - **Backend**: Python 3.8+, Flask 3.0
 - **Database**: SQLite (development), PostgreSQL/NeonDB (production), MySQL
-- **Frontend**: HTML5, CSS3, Bootstrap 5, JavaScript (Vanilla), Font Awesome 6
+- **Frontend**: HTML5, CSS3, Bootstrap 5, JavaScript (Vanilla), Socket.IO client, Font Awesome 6
+- **Real time**: Flask-SocketIO with the threading backend and notification polling fallback
 - **Production**: Gunicorn
 - **PostgreSQL Driver**: psycopg (v3)
 
@@ -40,7 +45,9 @@ college-study-material/
 │   ├── material.py
 │   ├── session.py
 │   ├── settings.py
-│   └── message.py
+│   ├── message.py
+│   ├── notification.py
+│   └── oauth_account.py
 ├── routes/
 │   ├── auth.py
 │   ├── user.py
@@ -102,7 +109,7 @@ college-study-material/
 ├── static/
 │   ├── 404.html
 │   ├── 500.html
-│   ├── images/
+│   ├── images/                # og-studyhub.png (1200 x 630 default preview)
 │   └── uploads/
 │       ├── assignments/
 │       ├── books/
@@ -121,11 +128,16 @@ college-study-material/
 │   ├── guest_activity.py
 │   ├── helpers.py
 │   ├── otp.py
-│   └── security.py
+│   ├── security.py
+│   ├── realtime.py
+│   ├── cookie_consent.py
+│   ├── google_oauth.py
+│   └── seo.py
 ├── instance/
 │   ├── college_study.sqlite        # SQLite database (dev)
 │   └── college_study.sqlite.bak    # SQLite backup
 ├── tests/
+│   ├── test_studyhub_features.py
 │   ├── tests_project.py            # Main test suite (69 tests)
 │   ├── tests_session_management.py # Session management tests (40 tests)
 │   └── tests_session_edge_cases.py # Session edge case tests (29 tests)
@@ -145,7 +157,7 @@ college-study-material/
 ├── CHANGELOG.md
 ├── TESTING.md
 ├── PROJECT_REPORT.md
-└── Procfile                    # Production: web: gunicorn app:app
+└── Procfile                    # Production: threaded Gunicorn application factory
 ```
 
 ## Installation
@@ -236,7 +248,7 @@ python init_sqlite.py
 python init_postgres.py
 ```
 
-If you have existing data in SQLite and want to migrate it to PostgreSQL, see the [Database Setup Guide](DATABASE_SETUP.md).
+If you have existing data in SQLite and want to migrate it to PostgreSQL, see the [Database Setup Guide](docs/DATABASE_SETUP.md).
 
 ### Step 6: Run Application
 
@@ -248,6 +260,37 @@ Visit: http://127.0.0.1:5000
 
 - **Student Site**: http://127.0.0.1:5000
 - **Admin Login**: http://127.0.0.1:5000/admin/login
+
+### Open Graph and canonical URLs
+
+Set `PUBLIC_BASE_URL` to the canonical production origin (for example,
+`https://studyhub.your-domain.tld`, without a path or trailing slash). StudyHub
+uses it to emit absolute canonical, Open Graph, Twitter/X, and preview-image
+URLs; it deliberately does not publish localhost or request-host URLs when the
+setting is absent or invalid. Put the default 1200 × 630 preview image at
+`static/images/og-studyhub.png`. Replace that file to customize the shared
+preview image. Public material and subject pages use their own titles and
+descriptions, while account/admin pages use generic metadata and are marked
+`noindex`.
+
+### Google sign-in setup
+
+Google sign-in is optional. Create an OAuth 2.0 Client ID of type **Web
+application** in Google Cloud Console, configure the OAuth consent screen, and
+add this exact **Authorized redirect URI**:
+
+```text
+https://your-production-domain.tld/google/callback
+```
+
+Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in the deployment environment
+(never commit them), and set `PUBLIC_BASE_URL` to the same HTTPS origin. For
+local development, configure the exact local callback URI displayed/used by
+your local deployment. StudyHub uses OpenID Connect `openid email profile`,
+requires Google's verified email claim, and lets Authlib validate OAuth state.
+New Google identities are stored separately from password credentials. An
+existing account is linked only after Google returns a verified matching
+email; inactive and deleted accounts cannot sign in.
 
 ### Email notification worker
 
@@ -293,21 +336,22 @@ part of the required persistence layer.
 
 The application supports three database backends with automatic selection:
 
-| Backend | Config | Use Case |
-|---------|--------|----------|
-| SQLite | `USE_SQLITE=true` | Local development |
-| PostgreSQL | `DATABASE_URL=<url>` | Production (NeonDB) |
-| MySQL | Default (no SQLite/PostgreSQL) | Alternative production |
+| Backend    | Config                         | Use Case               |
+| ---------- | ------------------------------ | ---------------------- |
+| SQLite     | `USE_SQLITE=true`              | Local development      |
+| PostgreSQL | `DATABASE_URL=<url>`           | Production (NeonDB)    |
+| MySQL      | Default (no SQLite/PostgreSQL) | Alternative production |
 
 **Connection Priority**: `USE_SQLITE=true` (SQLite) > `DATABASE_URL` (PostgreSQL) > MySQL default
 
 The database abstraction layer (`utils/database.py`) handles:
+
 - Connection management for all three backends
 - Placeholder conversion (`?` → `%s` for PostgreSQL/MySQL)
 - Row factory abstraction (dict-based for all backends)
 - Transaction management (`BEGIN IMMEDIATE` for SQLite, standard transactions for PostgreSQL/MySQL)
 
-See [DATABASE_SETUP.md](DATABASE_SETUP.md) for detailed database configuration.
+See [DATABASE_SETUP.md](docs/DATABASE_SETUP.md) for detailed database configuration.
 
 ## Admin Features
 
@@ -330,6 +374,8 @@ See [DATABASE_SETUP.md](DATABASE_SETUP.md) for detailed database configuration.
 - Register / Login / Logout with OTP verification
 - Browse subjects and materials
 - Search materials
+- Keyboard-accessible debounced autocomplete for materials and subjects
+- Private notification history, unread counts, and read controls
 - Filter by subject, category, file type, sort
 - View materials online:
   - PDF inline preview
@@ -361,14 +407,38 @@ See [DATABASE_SETUP.md](DATABASE_SETUP.md) for detailed database configuration.
 - XSS protection via Jinja2 auto-escaping and explicit `|e` filters
 - Soft delete for users with OTP confirmation
 - Inactive materials hidden from public access
+- Socket.IO rooms are joined only after validating the signed Flask session and active server-side user session
+- Notification reads and updates are scoped to the authenticated user
+- Cookie preferences use a signed, HttpOnly, SameSite=Lax cookie; HTTPS deployments should set `SESSION_COOKIE_SECURE=true`
+
+## Notifications and cookie preferences
+
+The application adds `user_notifications` and extends existing `announcements`
+with publication time, optional link, and audience fields using additive
+startup schema updates. Publishing active notes, books, assignments, practicals,
+or announcements creates deduplicated notifications for the selected users.
+The Socket.IO browser connection falls back to one notification poll per minute
+when disconnected or unavailable. Current assignment records do not include a
+deadline field, so deadline reminders are not scheduled.
+
+The cookie banner offers accept, reject, and individual preference settings.
+No analytics, advertising, or tracking cookies are introduced. A signed
+`studyhub_cookie_consent` cookie records the selection; dark-mode persistence
+is used only when optional preferences are enabled.
 
 ## Production Deployment
 
 ### Using Gunicorn
 
 ```bash
-gunicorn app:app
+gunicorn --worker-class gthread --workers 1 --threads 100 'app:create_app()'
 ```
+
+The threaded worker and `simple-websocket` dependency support Socket.IO
+WebSocket upgrades. Configure the reverse proxy to forward WebSocket upgrade
+headers. A single worker is intentional for the in-process Socket.IO server;
+multi-worker or multi-instance deployments need a shared Socket.IO message
+queue before scaling. Set `SESSION_COOKIE_SECURE=true` behind HTTPS.
 
 ### Environment Variables
 
@@ -416,7 +486,7 @@ python tests/tests_session_management.py
 python tests/tests_session_edge_cases.py
 ```
 
-See [TESTING.md](TESTING.md) for detailed test documentation and results.
+See [TESTING.md](docs/TESTING.md) for detailed test documentation and results.
 
 ## License
 

@@ -69,6 +69,7 @@
               class="form-control"
               id="ann_title"
               name="title"
+              maxlength="255"
               required
               autofocus
             />
@@ -80,7 +81,20 @@
               id="ann_desc"
               name="description"
               rows="2"
+              maxlength="5000"
             ></textarea>
+          </div>
+          <div class="mb-3">
+            <label for="ann_link" class="form-label">Optional link</label>
+            <input type="text" class="form-control" id="ann_link" name="link"
+                   maxlength="500" placeholder="https://... or /local-path">
+          </div>
+          <div class="mb-3">
+            <label for="ann_audience" class="form-label">Audience</label>
+            <select class="form-select" id="ann_audience" name="audience">
+              <option value="active" selected>Active users</option>
+              <option value="all">All non-deleted accounts</option>
+            </select>
           </div>
           <div class="mb-3 form-check form-switch">
             <input
@@ -91,7 +105,7 @@
               value="1"
               checked
             />
-            <label class="form-check-label" for="ann_active">Active</label>
+            <label class="form-check-label" for="ann_active">Publish now</label>
           </div>
           <button type="submit" class="btn btn-primary w-100">
             <i class="fas fa-plus me-2"></i>Add Announcement
@@ -120,15 +134,15 @@
               <td class="d-none d-md-table-cell text-muted">
                 {{ ann.description|truncate(60) if ann.description else '-' }}
               </td>
-              <td>{{ ann.created_at|default('N/A') }}</td>
+              <td>{{ ann.published_at|default(ann.created_at, true)|default('N/A') }}</td>
               <td>
                 {% if ann.is_active %}
                 <span class="badge bg-success bg-opacity-10 text-success"
-                  >Active</span
+                  >Published</span
                 >
                 {% else %}
                 <span class="badge bg-danger bg-opacity-10 text-danger"
-                  >Inactive</span
+                  >Archived</span
                 >
                 {% endif %}
               </td>
@@ -208,14 +222,27 @@
               class="form-control"
               name="title"
               value="{{ ann.title }}"
+              maxlength="255"
               required
             />
           </div>
           <div class="mb-3">
             <label class="form-label">Description</label>
-            <textarea class="form-control" name="description" rows="2">
+            <textarea class="form-control" name="description" rows="2" maxlength="5000">
 {{ ann.description }}</textarea
             >
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Optional link</label>
+            <input type="text" class="form-control" name="link" maxlength="500"
+                   value="{{ ann.link or '' }}" placeholder="https://... or /local-path">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Audience</label>
+            <select class="form-select" name="audience">
+              <option value="active" {% if ann.audience != 'all' %}selected{% endif %}>Active users</option>
+              <option value="all" {% if ann.audience == 'all' %}selected{% endif %}>All non-deleted accounts</option>
+            </select>
           </div>
           <div class="mb-3 form-check form-switch">
             <input
@@ -227,7 +254,7 @@
               {% if ann.is_active %}checked{% endif %}
             />
             <label class="form-check-label" for="ann_active_{{ ann.id }}"
-              >Active</label
+              >Published</label
             >
           </div>
         </div>

@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Home - {{ settings.get('site_name', 'College Study Material') }}{% endblock %}
+{% block favicon %}
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicons/favicon-home.svg') }}">
+{% endblock %}
 {% block extra_css %}
 <style>
     .hero-section {
@@ -176,10 +179,23 @@
         <div class="hero-content">
             <h1 class="mb-3">All Your 3rd Year Study Material in One Place</h1>
             <p class="lead mb-4 mx-auto" style="max-width:600px;">Access notes, assignments, books, practicals, question papers and more. Everything you need to ace your exams.</p>
-            <form class="search-hero d-flex mx-auto mb-4" action="{{ url_for('main.search') }}" method="GET" style="max-width:550px;">
-                <input type="text" class="form-control" name="q" placeholder="Search for notes, books, assignments..." required>
-                <button type="submit" class="btn btn-hero-primary"><i class="fas fa-search"></i></button>
-            </form>
+            <div class="hero-search-container position-relative mx-auto mb-4" style="max-width:550px;">
+                <form class="search-hero d-flex" action="{{ url_for('main.search') }}" method="GET" role="search">
+                    <label class="visually-hidden" for="heroSearchInput">Search study materials</label>
+                    <input type="text" class="form-control" id="heroSearchInput" name="q"
+                           placeholder="Search for notes, books, assignments..." required
+                           maxlength="100"
+                           autocomplete="off" aria-autocomplete="list"
+                           aria-controls="heroSearchSuggestions" aria-expanded="false"
+                           data-suggestions-url="{{ url_for('main.api_search_suggestions') }}">
+                    <button type="submit" class="btn btn-hero-primary" aria-label="Search">
+                        <i class="fas fa-search" aria-hidden="true"></i>
+                    </button>
+                </form>
+                <div class="search-suggestions" id="heroSearchSuggestions"
+                     role="listbox" aria-label="Search suggestions" hidden></div>
+                <div class="visually-hidden" id="heroSearchStatus" aria-live="polite"></div>
+            </div>
             <div class="d-flex gap-3 justify-content-center flex-wrap">
                 <a href="{{ url_for('main.subjects') }}" class="btn btn-hero-primary"><i class="fas fa-book-open me-2"></i>Browse Subjects</a>
                 <a href="{{ url_for('main.search') }}" class="btn btn-hero-outline"><i class="fas fa-search me-2"></i>Search Materials</a>

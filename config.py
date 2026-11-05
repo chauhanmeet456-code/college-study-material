@@ -36,6 +36,9 @@ class Config:
     MAIL_SEND_TIMEOUT = int(os.getenv('MAIL_SEND_TIMEOUT', '8'))
     MAIL_USE_TLS = True
     APP_NAME = os.getenv('APP_NAME', 'StudyHub')
+    PUBLIC_BASE_URL = os.getenv('PUBLIC_BASE_URL', '').strip().rstrip('/')
+    GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')
+    GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '')
     DEBUG = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
     SESSION_COOKIE_SECURE = os.getenv('SESSION_COOKIE_SECURE', 'false').lower() == 'true'
     SESSION_COOKIE_HTTPONLY = True

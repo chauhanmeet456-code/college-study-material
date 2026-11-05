@@ -1,0 +1,45 @@
+.cookie-banner {
+    position: fixed;
+    z-index: 1080;
+    left: 1rem;
+    right: 1rem;
+    bottom: 1rem;
+    max-width: 760px;
+    margin: auto;
+}
+
+.search-suggestions {
+    position: absolute;
+    z-index: 1060;
+    top: 100%;
+    left: 0;
+    right: 0;
+    max-height: 60vh;
+    overflow-y: auto;
+    background: var(--bg-card, #fff);
+    border: 1px solid var(--border-color, #e2e8f0);
+    border-radius: .5rem;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, .1);
+}
+
+.search-suggestions a {
+    display: block;
+    padding: .65rem .8rem;
+    color: var(--text-primary, #1e293b);
+    text-decoration: none;
+}
+
+.search-suggestions a:hover,
+.search-suggestions a:focus {
+    background: var(--primary-light, #dbeafe);
+}
+
+.notification-panel {
+    width: min(92vw, 360px);
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+.notification-entry.unread {
+    background: var(--primary-light, #dbeafe);
+}

@@ -395,9 +395,8 @@ def process_in_transaction(callback):
 # ---------------------------------------------------------------------------
 # Idempotent schema extensions
 # ---------------------------------------------------------------------------
-# These migrations are strictly additive. They add a column that lets the
-# session layer distinguish an administrator-ended session from an ordinary
-# revocation, and the durable account-deletion notification queue.
+# These migrations are strictly additive. They add a session status column,
+# durable notification queues, and external OAuth identity storage.
 #
 # They are safe to run repeatedly: every statement first checks whether the
 # column / table already exists, so running them on a database that is already
@@ -462,7 +461,7 @@ def _dialect(conn):
 
 
 def ensure_schema_extensions():
-    """Add the admin-ended-session flag and the notification queue table.
+    """Apply additive session, notification, and announcement schema updates.
 
     Additive only; never raises — a failed extension is logged and skipped so a
     locked-down or read-only connection can never break application startup.
@@ -477,7 +476,7 @@ def ensure_schema_extensions():
         try:
             dialect = _dialect(conn)
             changed = False
-            if not _has_column(conn, "user_sessions", "ended_by_admin"):
+            if _has_table(conn, "user_sessions") and not _has_column(conn, "user_sessions", "ended_by_admin"):
                 ddl = "ALTER TABLE user_sessions ADD COLUMN ended_by_admin INTEGER DEFAULT 0"
                 if dialect == "sqlite":
                     try:
@@ -493,6 +492,26 @@ def ensure_schema_extensions():
                     changed = True
             if not _has_table(conn, "pending_notifications"):
                 _notif.create_pending_notifications_table(conn, dialect)
+                changed = True
+            if _has_table(conn, "users") and not _has_table(conn, "user_oauth_accounts"):
+                oauth_id_column = (
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT"
+                    if dialect == "sqlite"
+                    else "id SERIAL PRIMARY KEY"
+                    if dialect == "postgres"
+                    else "id BIGINT AUTO_INCREMENT PRIMARY KEY"
+                )
+                conn.execute(
+                    "CREATE TABLE user_oauth_accounts ("
+                    + oauth_id_column + ", "
+                    "provider VARCHAR(32) NOT NULL, "
+                    "provider_subject_hash VARCHAR(64) NOT NULL, "
+                    "user_id INTEGER NOT NULL, "
+                    "linked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+                    "UNIQUE (provider, provider_subject_hash), "
+                    "UNIQUE (user_id, provider), "
+                    "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE)"
+                )
                 changed = True
             queue_columns = (
                 ("retryable", "INTEGER DEFAULT 1"),
@@ -511,6 +530,67 @@ def ensure_schema_extensions():
                     except Exception as exc:
                         if "duplicate column" not in str(exc).lower():
                             errors.append(type(exc).__name__)
+            if changed:
+                conn.commit()
+
+            if _has_table(conn, "announcements"):
+                announcement_columns = (
+                    ("published_at", "TIMESTAMP DEFAULT NULL"),
+                    ("link", "VARCHAR(500) DEFAULT NULL"),
+                    ("audience", "VARCHAR(20) DEFAULT 'active'"),
+                )
+                for column, definition in announcement_columns:
+                    if not _has_column(conn, "announcements", column):
+                        conn.execute(
+                            "ALTER TABLE announcements ADD COLUMN "
+                            + column + " " + definition
+                        )
+                        changed = True
+
+            if _has_table(conn, "users") and not _has_table(conn, "user_notifications"):
+                if dialect == "sqlite":
+                    conn.execute(
+                        "CREATE TABLE user_notifications ("
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                        "user_id INTEGER NOT NULL, "
+                        "title VARCHAR(255) NOT NULL, "
+                        "message TEXT NOT NULL, "
+                        "link VARCHAR(500) DEFAULT NULL, "
+                        "dedupe_key VARCHAR(180) DEFAULT NULL, "
+                        "is_read INTEGER NOT NULL DEFAULT 0, "
+                        "created_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                        "FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE, "
+                        "UNIQUE(user_id, dedupe_key))"
+                    )
+                elif dialect == "postgres":
+                    conn.execute(
+                        "CREATE TABLE user_notifications ("
+                        "id SERIAL PRIMARY KEY, "
+                        "user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, "
+                        "title VARCHAR(255) NOT NULL, "
+                        "message TEXT NOT NULL, "
+                        "link VARCHAR(500) DEFAULT NULL, "
+                        "dedupe_key VARCHAR(180) DEFAULT NULL, "
+                        "is_read INTEGER NOT NULL DEFAULT 0, "
+                        "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+                        "UNIQUE(user_id, dedupe_key))"
+                    )
+                else:
+                    conn.execute(
+                        "CREATE TABLE user_notifications ("
+                        "id BIGINT AUTO_INCREMENT PRIMARY KEY, "
+                        "user_id BIGINT NOT NULL, "
+                        "title VARCHAR(255) NOT NULL, "
+                        "message TEXT NOT NULL, "
+                        "link VARCHAR(500) DEFAULT NULL, "
+                        "dedupe_key VARCHAR(180) DEFAULT NULL, "
+                        "is_read INTEGER NOT NULL DEFAULT 0, "
+                        "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+                        "UNIQUE KEY uq_user_notification_dedupe(user_id, dedupe_key), "
+                        "FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)"
+                    )
+                changed = True
+
             if changed:
                 conn.commit()
         finally:

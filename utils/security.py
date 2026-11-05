@@ -169,10 +169,10 @@ def apply_security_headers(response):
         "img-src 'self' data: https:; "
         "media-src 'self' data:; "
         "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.googleapis.com; "
-        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdn.socket.io; "
         "font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com; "
         "frame-src 'self' https://maps.google.com https://www.google.com https://www.openstreetmap.org; "
-        "connect-src 'self' https://cdn.jsdelivr.net; "
+        "connect-src 'self' https://cdn.jsdelivr.net wss: ws:; "
         "form-action 'self'"
     )
     response.headers.setdefault('Content-Security-Policy', csp)

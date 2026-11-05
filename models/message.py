@@ -79,17 +79,38 @@ class ContactMessage:
 
 class Announcement:
     @staticmethod
-    def create(title, description):
+    def create(title, description, is_active=1, link=None, audience='active'):
         conn = get_connection()
         cursor = None
         try:
             cursor = get_cursor(conn)
-            cursor.execute("INSERT INTO announcements (title, description) VALUES (?, ?)", (title, description))
+            published_at = datetime.now() if is_active else None
+            cursor.execute(
+                "INSERT INTO announcements "
+                "(title, description, is_active, published_at, link, audience) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (title, description, is_active, published_at, link, audience),
+            )
             conn.commit()
-            return cursor.lastrowid
+            announcement_id = cursor.lastrowid
         finally:
             close_cursor(cursor)
             conn.close()
+        if is_active:
+            Announcement._notify(announcement_id, title, description, link, audience)
+        return announcement_id
+
+    @staticmethod
+    def _notify(announcement_id, title, description, link, audience):
+        from models.notification import Notification
+
+        Notification.create_for_users(
+            title,
+            description or title,
+            link,
+            dedupe_key='announcement:{}'.format(announcement_id),
+            audience=audience,
+        )
 
     @staticmethod
     def get_all_active(limit=5):
@@ -145,23 +166,44 @@ class Announcement:
     def update(announcement_id, **kwargs):
         conn = get_connection()
         cursor = None
+        was_active = False
         try:
-            allowed = ['title', 'description', 'is_active']
+            cursor = get_cursor(conn)
+            cursor.execute(
+                "SELECT is_active FROM announcements WHERE id = ?",
+                (announcement_id,),
+            )
+            existing = cursor.fetchone()
+            if not existing:
+                return False
+            was_active = bool(existing.get('is_active'))
+            allowed = ['title', 'description', 'is_active', 'link', 'audience']
             fields = []
             values = []
             for key, value in kwargs.items():
                 if key in allowed:
                     fields.append(f"{key} = ?")
                     values.append(value)
+            if kwargs.get('is_active') and not was_active:
+                fields.append("published_at = ?")
+                values.append(datetime.now())
             if not fields:
-                return
+                return True
             values.append(announcement_id)
-            cursor = get_cursor(conn)
             cursor.execute(f"UPDATE announcements SET {', '.join(fields)} WHERE id = ?", values)
             conn.commit()
         finally:
             close_cursor(cursor)
             conn.close()
+        if kwargs.get('is_active') and not was_active:
+            Announcement._notify(
+                announcement_id,
+                kwargs['title'],
+                kwargs.get('description', ''),
+                kwargs.get('link'),
+                kwargs.get('audience', 'active'),
+            )
+        return True
 
     @staticmethod
     def delete(announcement_id):

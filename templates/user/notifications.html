@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Notifications - StudyHub{% endblock %}
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+        <div>
+            <h1 class="h3 fw-bold mb-1">Notification history</h1>
+            <p class="text-secondary mb-0">{{ unread_count }} unread notification(s)</p>
+        </div>
+        <button class="btn btn-outline-primary" type="button" id="markAllNotificationsRead">
+            <i class="fas fa-check-double me-1" aria-hidden="true"></i>Mark all as read
+        </button>
+    </div>
+    <p class="text-danger small" id="notificationStatus" role="status" aria-live="polite"></p>
+    <div class="list-group" id="notificationHistory">
+        {% for notification in notifications %}
+        <article class="list-group-item notification-entry {% if not notification.is_read %}unread{% endif %}"
+                 data-notification-id="{{ notification.id }}">
+            <div class="d-flex justify-content-between gap-3">
+                <div>
+                    <h2 class="h6 fw-semibold mb-1">{{ notification.title }}</h2>
+                    <p class="mb-1">{{ notification.message }}</p>
+                    <time class="small text-muted">{{ notification.created_at|format_datetime }}</time>
+                    {% if notification.link %}
+                    <div><a class="small" href="{{ notification.link }}">Open</a></div>
+                    {% endif %}
+                </div>
+                <div class="text-end">
+                    <span class="badge {% if notification.is_read %}bg-secondary{% else %}bg-primary{% endif %}">
+                        {{ 'Read' if notification.is_read else 'Unread' }}
+                    </span>
+                    {% if not notification.is_read %}
+                    <button class="btn btn-sm btn-link d-block" type="button" data-mark-notification="{{ notification.id }}">
+                        Mark read
+                    </button>
+                    {% endif %}
+                </div>
+            </div>
+        </article>
+        {% else %}
+        <p class="text-secondary py-4 text-center">You have no notifications yet.</p>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

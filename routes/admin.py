@@ -21,6 +21,7 @@ from utils.security import csrf_protect
 import secrets
 from datetime import timedelta
 from config import Config
+from urllib.parse import urlparse
 
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
@@ -540,11 +541,17 @@ def add_announcement():
     title = request.form.get('title', '').strip()
     description = request.form.get('description', '').strip()
     is_active = 1 if request.form.get('is_active') else 0
-    if title:
-        Announcement.create(title, description)
-        flash('Announcement created successfully!', 'success')
+    link = _validated_announcement_link(request.form.get('link', '').strip())
+    audience = request.form.get('audience', 'active')
+    if not title or len(title) > 255 or len(description) > 5000:
+        flash('A title of up to 255 characters and a description of up to 5000 characters are required.', 'danger')
+    elif request.form.get('link', '').strip() and link is None:
+        flash('The announcement link must be a valid HTTPS URL or a local path.', 'danger')
+    elif audience not in ('all', 'active'):
+        flash('Choose a valid announcement audience.', 'danger')
     else:
-        flash('Title is required.', 'danger')
+        Announcement.create(title, description, is_active, link, audience)
+        flash('Announcement created successfully!', 'success')
     return redirect(url_for('admin.announcements_list'))
 
 @admin_bp.route('/announcements/edit/<int:announcement_id>', methods=['POST'])
@@ -554,11 +561,28 @@ def edit_announcement(announcement_id):
     title = request.form.get('title', '').strip()
     description = request.form.get('description', '').strip()
     is_active = 1 if request.form.get('is_active') else 0
-    if title:
-        Announcement.update(announcement_id, title=title, description=description, is_active=is_active)
-        flash('Announcement updated successfully!', 'success')
+    raw_link = request.form.get('link', '').strip()
+    link = _validated_announcement_link(raw_link)
+    audience = request.form.get('audience', 'active')
+    if not title or len(title) > 255 or len(description) > 5000:
+        flash('A title of up to 255 characters and a description of up to 5000 characters are required.', 'danger')
+    elif raw_link and link is None:
+        flash('The announcement link must be a valid HTTPS URL or a local path.', 'danger')
+    elif audience not in ('all', 'active'):
+        flash('Choose a valid announcement audience.', 'danger')
     else:
-        flash('Title is required.', 'danger')
+        updated = Announcement.update(
+            announcement_id,
+            title=title,
+            description=description,
+            is_active=is_active,
+            link=link,
+            audience=audience,
+        )
+        if not updated:
+            flash('Announcement not found.', 'danger')
+            return redirect(url_for('admin.announcements_list'))
+        flash('Announcement updated successfully!', 'success')
     return redirect(url_for('admin.announcements_list'))
 
 @admin_bp.route('/announcements/delete/<int:announcement_id>', methods=['POST'])
@@ -568,6 +592,19 @@ def delete_announcement(announcement_id):
     Announcement.delete(announcement_id)
     flash('Announcement deleted successfully!', 'success')
     return redirect(url_for('admin.announcements_list'))
+
+
+def _validated_announcement_link(value):
+    if not value:
+        return None
+    if len(value) > 500 or any(ord(ch) < 32 for ch in value):
+        return None
+    if value.startswith('/') and not value.startswith('//'):
+        return value
+    parsed = urlparse(value)
+    if parsed.scheme == 'https' and parsed.netloc and not parsed.username and not parsed.password:
+        return value
+    return None
 
 @admin_bp.route('/profile', methods=['GET', 'POST'])
 @admin_required
@@ -924,4 +961,3 @@ def _audit_logs_for_target(target_type, target_id, limit=25):
     finally:
         close_cursor(cursor)
         conn.close()
-

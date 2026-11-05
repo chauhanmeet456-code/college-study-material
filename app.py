@@ -27,6 +27,10 @@ from utils.security import (
     csrf_input,
     generate_csrf_token,
 )
+from utils.cookie_consent import get_cookie_preferences
+from utils.realtime import init_socketio
+from utils.google_oauth import google_oauth_enabled, init_google_oauth
+from utils.seo import build_seo_context, clean_meta_description
 
 # Endpoints that must not trigger a session validity check, because running it
 # would be circular (login, logout, OTP exchange, admin auth) or pointless
@@ -36,6 +40,8 @@ SKIP_SESSION_CHECK_ENDPOINTS = {
     'auth.login',
     'auth.register',
     'auth.logout',
+    'auth.google_login',
+    'auth.google_callback',
     'auth.send_otp',
     'auth.verify_otp',
     'auth.forgot_password',
@@ -67,12 +73,14 @@ def create_app():
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
     app.config['SESSION_COOKIE_SECURE'] = Config.SESSION_COOKIE_SECURE
+    init_google_oauth(app)
 
     os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
     app.register_blueprint(main_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(user_bp)
     app.register_blueprint(admin_bp)
+    init_socketio(app)
 
     # Add the ended_by_admin column and the notification queue table if they
     # are not already present.  This is wrapped defensively so a locked-down
@@ -89,6 +97,11 @@ def create_app():
             "csrf_input": csrf_input,
             "csrf_token": generate_csrf_token,
             "app_name": Config.APP_NAME,
+            "cookie_preferences": get_cookie_preferences(
+                request.cookies.get('studyhub_cookie_consent')
+            ),
+            "seo": build_seo_context(),
+            "google_oauth_enabled": google_oauth_enabled(),
         }
 
     @app.context_processor
@@ -98,6 +111,8 @@ def create_app():
             return {"settings": Settings.get_all()}
         except Exception:
             return {"settings": {}}
+
+    app.jinja_env.filters['plain_meta'] = clean_meta_description
 
     @app.before_request
     def log_request_time():
@@ -336,4 +351,6 @@ def _touch_activity(row):
 
 if __name__ == "__main__":
     app = create_app()
-    app.run(debug=Config.DEBUG, port=5000)
+    from utils.realtime import socketio
+
+    socketio.run(app, debug=Config.DEBUG, port=5000)
