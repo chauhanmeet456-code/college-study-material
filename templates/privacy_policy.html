@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Privacy Policy - StudyHub{% endblock %}
+{% block content %}
+<article class="container py-5" style="max-width: 960px;" aria-labelledby="privacy-policy-title">
+    <header class="mb-4">
+        <h1 class="h2 fw-bold mb-2" id="privacy-policy-title">Privacy Policy</h1>
+        <p class="text-secondary mb-2">This policy explains what information StudyHub processes when you browse the site or use an account.</p>
+        <p class="small text-muted mb-0"><strong>Last updated:</strong> 6 November 2026</p>
+    </header>
+
+    <nav class="card mb-4" aria-label="Privacy Policy contents">
+        <div class="card-body">
+            <h2 class="h5 fw-semibold">Contents</h2>
+            <ol class="mb-0">
+                <li><a href="#scope">Scope</a></li>
+                <li><a href="#information">Information processed</a></li>
+                <li><a href="#use">How information is used</a></li>
+                <li><a href="#cookies">Cookies and browser storage</a></li>
+                <li><a href="#sharing">Storage and service providers</a></li>
+                <li><a href="#security">Security</a></li>
+                <li><a href="#retention">Retention and account deletion</a></li>
+                <li><a href="#your-choices">Your choices and requests</a></li>
+                <li><a href="#children">Children's privacy</a></li>
+                <li><a href="#changes">Changes and contact</a></li>
+            </ol>
+        </div>
+    </nav>
+
+    <section class="card mb-4" id="scope" aria-labelledby="scope-title">
+        <div class="card-body">
+            <h2 class="h4 fw-semibold" id="scope-title">1. Scope</h2>
+            <p class="mb-0">StudyHub provides access to college study materials, subject listings, accounts, and related features. This policy describes information processed by the StudyHub application as currently implemented. It is not a statement that StudyHub complies with any particular privacy law. External services used to operate or display the site have their own privacy terms.</p>
+        </div>
+    </section>
+
+    <section class="card mb-4" id="information" aria-labelledby="information-title">
+        <div class="card-body">
+            <h2 class="h4 fw-semibold" id="information-title">2. Information processed</h2>
+            <h3 class="h6 fw-semibold mt-3">Account and profile information</h3>
+            <p>When you register or use an account, StudyHub processes your name, email address, account identifier, password hash, profile image path if you upload one, account status, and account timestamps. Passwords are processed to verify sign-in and are stored as password hashes rather than as the original password.</p>
+
+            <h3 class="h6 fw-semibold mt-3">Google sign-in</h3>
+            <p>If you choose Google sign-in, Google provides the profile information requested by the OpenID Connect sign-in flow, including your verified email address, name, and provider subject identifier. StudyHub uses these details to create or locate your account; it stores a hash of the provider subject identifier. StudyHub does not request access to your Google contacts, calendar, or files through this flow.</p>
+
+            <h3 class="h6 fw-semibold mt-3">Email verification and security</h3>
+            <p>For registration, sign-in, password reset, and account-deletion confirmation, StudyHub may process your email address and a one-time verification code. The code, challenge purpose, expiry timestamp, attempt and resend counts, and in some flows the requesting IP address are maintained in Flask session state while the challenge is active. Codes are treated as invalid after the configured expiry period (five minutes by default).</p>
+            <p>For authentication and abuse prevention, the application may record login and security events, timestamps, IP addresses, and device/browser/operating-system descriptions. Failed-attempt records use a masked email address. Active session records include an expiry, status, device details, and a hash of the random session token; the raw session token is used in the signed session cookie.</p>
+
+            <h3 class="h6 fw-semibold mt-3">StudyHub activity and communications</h3>
+            <p>StudyHub stores favorites, notification read status and notification content, and guest material-view or download counts associated with a random session identifier. If you use the contact form, your name, email address, subject, and message are stored so the site administrators can review the request. Users may upload a profile image; study materials are managed through the administrator interface.</p>
+        </div>
+    </section>
+
+    <section class="card mb-4" id="use" aria-labelledby="use-title">
+        <div class="card-body">
+            <h2 class="h4 fw-semibold" id="use-title">3. How information is used</h2>
+            <p>Information is used to create and maintain accounts, authenticate users, deliver OTP and account messages, remember preferences, display favorites and notifications, provide study materials, respond to contact requests, enforce session and guest-access limits, and investigate sign-in or security issues. The application does not include analytics or advertising scripts in its page templates.</p>
+        </div>
+    </section>
+
+    <section class="card mb-4" id="cookies" aria-labelledby="cookies-title">
+        <div class="card-body">
+            <h2 class="h4 fw-semibold" id="cookies-title">4. Cookies and browser storage</h2>
+            <p>Necessary Flask session cookies support authentication, temporary verification state, CSRF checks, and other session features. The Flask session cookie is signed but not encrypted, and is configured HttpOnly and SameSite=Lax. The Secure attribute depends on deployment configuration and should be enabled for HTTPS production. Optional display preference storage, such as dark-mode preference, is only used after consent. Cookie consent choices are stored in a signed cookie for up to one year.</p>
+            <p class="mb-0">For details and ways to change your choice, read the <a href="{{ url_for('main.cookie_policy') }}">Cookie Policy</a> or use Cookie Preferences in the site footer. Blocking necessary cookies may prevent account and security features from working.</p>
+        </div>
+    </section>
+
+    <section class="card mb-4" id="sharing" aria-labelledby="sharing-title">
+        <div class="card-body">
+            <h2 class="h4 fw-semibold" id="sharing-title">5. Storage and service providers</h2>
+            <p>Application records are stored in the database configured by the site operator (the project supports SQLite, PostgreSQL, and MySQL-compatible deployments). Uploaded files are stored in the configured upload location. The hosting and database providers, their locations, backups, and access controls depend on the deployment.</p>
+            <p>The application can send verification and account emails through the configured SMTP provider. Google processes information when you choose Google sign-in. Page assets may be loaded from configured third-party content-delivery services, including providers for fonts and front-end libraries; those providers may receive standard connection information such as your IP address and browser data. Their own policies apply to that processing.</p>
+            <p class="mb-0">StudyHub does not describe or control provider-side logs or retention. No sale of personal information or advertising use is implemented in the application features reviewed for this policy.</p>
+        </div>
+    </section>
+
+    <section class="card mb-4" id="security" aria-labelledby="security-title">
+        <div class="card-body">
+            <h2 class="h4 fw-semibold" id="security-title">6. Security</h2>
+            <p class="mb-0">The application uses password hashing, CSRF checks for state-changing requests, signed session cookies, session expiry and revocation, and restricted access to account and administrative functions. No online service can be guaranteed completely secure. Cookie security attributes and infrastructure protections also depend on correct production configuration and the hosting environment. Keep your password and session cookie private, and contact StudyHub if you suspect unauthorized access.</p>
+        </div>
+    </section>
+
+    <section class="card mb-4" id="retention" aria-labelledby="retention-title">
+        <div class="card-body">
+            <h2 class="h4 fw-semibold" id="retention-title">7. Retention and account deletion</h2>
+            <p>OTP challenges have a configured validity period, and authenticated sessions expire according to application settings. Other account, favorites, contact-message, notification, activity, and security records are stored in the configured database. The application does not apply a general automatic deletion schedule to all such records; actual retention also depends on administrator actions, deployment configuration, database operations, and backups.</p>
+            <p class="mb-0">You can request account deletion from your profile. The flow verifies the request and initially marks the account inactive/deleted; the application provides an administrator processing step and permanent deletion action. Therefore, a request does not necessarily mean every related record or backup is immediately erased. You can use the <a href="{{ url_for('main.contact') }}">Contact page</a> if you cannot access your account or need help with a request.</p>
+        </div>
+    </section>
+
+    <section class="card mb-4" id="your-choices" aria-labelledby="your-choices-title">
+        <div class="card-body">
+            <h2 class="h4 fw-semibold" id="your-choices-title">8. Your choices and requests</h2>
+            <p>You can update available profile details, change your password, review and revoke active sessions, manage favorites, and request account deletion through account features. You can change optional cookie preferences through the footer or your browser settings. For questions about information associated with your account, contact StudyHub using the <a href="{{ url_for('main.contact') }}">Contact page</a>. Requests may need verification to protect the account.</p>
+            <p class="mb-0">Applicable rights and processes can depend on where you live and how the service is operated. This page does not make a legal-compliance determination.</p>
+        </div>
+    </section>
+
+    <section class="card mb-4" id="children" aria-labelledby="children-title">
+        <div class="card-body">
+            <h2 class="h4 fw-semibold" id="children-title">9. Children's privacy</h2>
+            <p class="mb-0">StudyHub is organized around college study materials. The application does not request a date of birth or provide an age-verification feature. If you believe a child has provided personal information and would like it reviewed, please contact StudyHub through the <a href="{{ url_for('main.contact') }}">Contact page</a>.</p>
+        </div>
+    </section>
+
+    <section class="card mb-4" id="changes" aria-labelledby="changes-title">
+        <div class="card-body">
+            <h2 class="h4 fw-semibold" id="changes-title">10. Changes and contact</h2>
+            <p>StudyHub may update this policy when the application or its practices change. The “Last updated” date above indicates the latest editorial update. Please review this page periodically.</p>
+            <p class="mb-0">For privacy questions or requests, use the <a href="{{ url_for('main.contact') }}">StudyHub Contact page</a>. You can also review the <a href="{{ url_for('main.terms_of_service') }}">Terms of Service</a> and return to the <a href="{{ url_for('main.index') }}">StudyHub homepage</a>.</p>
+        </div>
+    </section>
+</article>
+{% endblock %}

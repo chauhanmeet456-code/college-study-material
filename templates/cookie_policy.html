@@ -6,10 +6,10 @@
     <p>Cookies are small text files stored by your browser. StudyHub uses only the storage needed to keep the service secure and, when you consent, remember an optional display preference.</p>
 
     <h2 class="h4 mt-4">Necessary cookies</h2>
-    <p>Necessary cookies support authentication, signed sessions, CSRF protection, and security. They are always enabled because the site cannot provide protected account features safely without them. Never store passwords, OTPs, or sensitive personal information in cookies.</p>
+    <p>Necessary cookies support authentication, signed sessions, CSRF protection, and security. The Flask session cookie is signed (not encrypted), marked HttpOnly and SameSite=Lax, and can contain temporary session and verification state, including OTP challenge data. OTPs are treated as invalid after the configured expiry period (five minutes by default). The Secure attribute depends on the deployment setting and should be enabled when serving the site over HTTPS. Do not share or copy your session cookie.</p>
 
     <h2 class="h4 mt-4">Optional preference storage</h2>
-    <p>If you opt in, StudyHub may use browser storage to remember display preferences such as dark mode. This is optional and is not activated before consent. StudyHub does not set analytics, advertising, or tracking cookies.</p>
+    <p>If you opt in, StudyHub may use browser storage to remember display preferences such as dark mode. This is optional and is not activated before consent. No analytics or advertising scripts were identified in the application templates; this does not describe logs maintained by hosting, email, OAuth, or content-delivery providers.</p>
 
     <h2 class="h4 mt-4">Consent and changing your choice</h2>
     <p>On your first visit, you can accept all optional preferences, reject them, or choose them individually in Cookie Settings. Your choice is kept in a signed, HttpOnly cookie for up to one year. You can change or withdraw it at any time using <a href="#cookie-settings">Cookie Preferences</a> in the footer.</p>

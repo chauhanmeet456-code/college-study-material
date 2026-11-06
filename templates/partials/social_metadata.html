@@ -5,19 +5,28 @@
 {% set social_type = "website" %}
 {% endif %}
 <meta name="description" content="{{ social_description }}">
+{% if seo.is_public_page and meta_robots is defined %}
+<meta name="robots" content="{{ meta_robots }}">
+{% endif %}
 {% if seo.canonical_url %}<link rel="canonical" href="{{ seo.canonical_url }}">{% endif %}
 <meta property="og:title" content="{{ social_title }}">
 <meta property="og:description" content="{{ social_description }}">
 {% if seo.og_image_url %}
 <meta property="og:image" content="{{ seo.og_image_url }}">
+{% if seo.og_image_secure_url %}<meta property="og:image:secure_url" content="{{ seo.og_image_secure_url }}">{% endif %}
+<meta property="og:image:type" content="{{ seo.og_image_type }}">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="{{ seo.og_image_alt }}">
 {% endif %}
 {% if seo.canonical_url %}<meta property="og:url" content="{{ seo.canonical_url }}">{% endif %}
 <meta property="og:type" content="{{ meta_type|default('website') }}">
 <meta property="og:site_name" content="{{ app_name }}">
-<meta property="og:locale" content="en_US">
+<meta property="og:locale" content="en_IN">
 <meta name="twitter:card" content="{% if seo.og_image_url %}summary_large_image{% else %}summary{% endif %}">
 <meta name="twitter:title" content="{{ social_title }}">
 <meta name="twitter:description" content="{{ social_description }}">
-{% if seo.og_image_url %}<meta name="twitter:image" content="{{ seo.og_image_url }}">{% endif %}
+{% if seo.og_image_url %}
+<meta name="twitter:image" content="{{ seo.og_image_url }}">
+<meta name="twitter:image:alt" content="{{ seo.og_image_alt }}">
+{% endif %}

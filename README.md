@@ -256,7 +256,7 @@ If you have existing data in SQLite and want to migrate it to PostgreSQL, see th
 python app.py
 ```
 
-Visit: http://127.0.0.1:5000
+Visit: https://college-study-material.onrender.com
 
 - **Student Site**: http://127.0.0.1:5000
 - **Admin Login**: http://127.0.0.1:5000/admin/login
@@ -276,6 +276,18 @@ not a localhost address or temporary development tunnel. Put the default
 preview image. Public material and subject pages use their own titles and
 descriptions, and Login and Registration have dedicated metadata. Private
 account/admin pages use generic metadata and are marked `noindex`.
+
+### Legal pages
+
+The public Privacy Policy and Terms of Service are available at
+`/privacy-policy` and `/terms-of-service`. Their content and “Last updated”
+dates are maintained in `templates/privacy_policy.html` and
+`templates/terms_of_service.html`. Review both with an appropriate legal
+professional before relying on them as binding terms or a jurisdiction-specific
+privacy notice. For the supplied Render deployment, set `PUBLIC_BASE_URL` to
+`https://college-study-material.onrender.com` in the deployment environment;
+the application does not infer a production canonical URL from a local host or
+temporary tunnel.
 
 ### Google sign-in setup
 

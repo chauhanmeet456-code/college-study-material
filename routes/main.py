@@ -365,6 +365,34 @@ def about():
 def cookie_policy():
     return render_template('cookie_policy.html', current_user=get_current_user())
 
+@main_bp.route('/privacy-policy')
+def privacy_policy():
+    return render_template(
+        'privacy_policy.html',
+        current_user=get_current_user(),
+        meta_title='Privacy Policy - StudyHub',
+        meta_description=(
+            'Learn what account, login, and study activity information StudyHub '
+            'processes, why it is used, and how to contact us about your data.'
+        ),
+        meta_type='website',
+        meta_robots='index, follow',
+    )
+
+@main_bp.route('/terms-of-service')
+def terms_of_service():
+    return render_template(
+        'terms_of_service.html',
+        current_user=get_current_user(),
+        meta_title='Terms of Service - StudyHub',
+        meta_description=(
+            'Read the terms for using StudyHub accounts, study resources, '
+            'user-provided content, and platform features.'
+        ),
+        meta_type='website',
+        meta_robots='index, follow',
+    )
+
 @main_bp.route('/api/cookie-consent', methods=['POST'])
 @csrf_protect
 def save_cookie_consent():

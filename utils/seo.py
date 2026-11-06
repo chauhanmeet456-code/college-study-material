@@ -22,6 +22,8 @@ PUBLIC_ENDPOINTS = {
     'main.search',
     'main.about',
     'main.cookie_policy',
+    'main.privacy_policy',
+    'main.terms_of_service',
     'main.contact',
     'auth.login',
     'auth.register',
@@ -43,6 +45,14 @@ PAGE_DESCRIPTIONS = {
     'main.search': 'Search StudyHub for notes, books, assignments, and other study materials.',
     'main.about': 'Learn about StudyHub and its college study material resources.',
     'main.cookie_policy': 'Learn how StudyHub uses necessary and optional cookies.',
+    'main.privacy_policy': (
+        'Learn what account, login, and study activity information StudyHub '
+        'processes, why it is used, and how to contact us about your data.'
+    ),
+    'main.terms_of_service': (
+        'Read the terms for using StudyHub accounts, study resources, '
+        'user-provided content, and platform features.'
+    ),
     'main.contact': 'Contact StudyHub for help with study materials and your account.',
     'auth.login': 'Sign in to your StudyHub account to access your study materials.',
     'auth.register': 'Create a StudyHub account to access notes, books, and course resources.',
@@ -161,6 +171,14 @@ def build_seo_context():
             if os.path.isfile(image_file)
             else ''
         ),
+        'og_image_secure_url': (
+            absolute_public_url(image_path)
+            if os.path.isfile(image_file)
+            and _public_origin().startswith('https://')
+            else ''
+        ),
+        'og_image_type': 'image/png',
+        'og_image_alt': 'StudyHub - college study materials and course resources',
         'default_meta_description': PAGE_DESCRIPTIONS.get(
             endpoint,
             'Explore college study materials and course resources on StudyHub.',

@@ -481,6 +481,138 @@ def test_public_pages_have_absolute_page_specific_social_metadata(feature_app):
     ) == 'https://studyhub.example/notes'
 
 
+def test_legal_pages_are_public_linked_and_have_complete_unique_metadata(feature_app):
+    production_origin = 'https://college-study-material.onrender.com'
+    feature_app.config['PUBLIC_BASE_URL'] = production_origin
+    client = feature_app.test_client()
+    pages = (
+        (
+            '/privacy-policy',
+            'Privacy Policy',
+            'Privacy Policy - StudyHub',
+            production_origin + '/privacy-policy',
+            '/terms-of-service',
+        ),
+        (
+            '/terms-of-service',
+            'Terms of Service',
+            'Terms of Service - StudyHub',
+            production_origin + '/terms-of-service',
+            '/privacy-policy',
+        ),
+    )
+    expected_image = production_origin + '/static/images/og-studyhub.png'
+
+    for path, heading, title, canonical, other_page in pages:
+        response = client.get(path)
+        assert response.status_code == 200
+        html = response.get_data(as_text=True)
+        metadata = _metadata(response)
+        assert f'<h1 class="h2 fw-bold mb-2" id="' in html
+        assert heading in html
+        assert 'Last updated:</strong> 6 November 2026' in html
+        assert f'href="{other_page}"' in html
+        assert 'href="/"' in html
+        assert 'href="/contact"' in html
+        assert 'href="/privacy-policy"' in html
+        assert 'href="/terms-of-service"' in html
+
+        assert len([
+            tag for tag in metadata if tag.get('property') == 'og:title'
+        ]) == 1
+        assert len([
+            tag for tag in metadata if tag.get('property') == 'og:description'
+        ]) == 1
+        assert len([
+            tag for tag in metadata if tag.get('property') == 'og:url'
+        ]) == 1
+        assert len([
+            tag for tag in metadata if tag.get('property') == 'og:image'
+        ]) == 1
+        assert len([
+            tag for tag in metadata if tag.get('name') == 'twitter:card'
+        ]) == 1
+        assert len([
+            line for line in html.splitlines()
+            if '<link rel="canonical"' in line
+        ]) == 1
+        assert (
+            f'<link rel="canonical" href="{canonical}">' in html
+        )
+        assert next(
+            tag['content'] for tag in metadata
+            if tag.get('property') == 'og:title'
+        ) == title
+        assert next(
+            tag['content'] for tag in metadata
+            if tag.get('property') == 'og:url'
+        ) == canonical
+        assert next(
+            tag['content'] for tag in metadata
+            if tag.get('property') == 'og:image'
+        ) == expected_image
+        assert next(
+            tag['content'] for tag in metadata
+            if tag.get('property') == 'og:image:secure_url'
+        ) == expected_image
+        assert next(
+            tag['content'] for tag in metadata
+            if tag.get('property') == 'og:image:type'
+        ) == 'image/png'
+        assert next(
+            tag['content'] for tag in metadata
+            if tag.get('property') == 'og:image:width'
+        ) == '1200'
+        assert next(
+            tag['content'] for tag in metadata
+            if tag.get('property') == 'og:image:height'
+        ) == '630'
+        assert next(
+            tag['content'] for tag in metadata
+            if tag.get('property') == 'og:image:alt'
+        ) == 'StudyHub - college study materials and course resources'
+        assert next(
+            tag['content'] for tag in metadata
+            if tag.get('property') == 'og:locale'
+        ) == 'en_IN'
+        assert next(
+            tag['content'] for tag in metadata
+            if tag.get('name') == 'twitter:card'
+        ) == 'summary_large_image'
+        assert next(
+            tag['content'] for tag in metadata
+            if tag.get('name') == 'twitter:image'
+        ) == expected_image
+        assert next(
+            tag['content'] for tag in metadata
+            if tag.get('name') == 'twitter:image:alt'
+        ) == 'StudyHub - college study materials and course resources'
+        assert next(
+            tag['content'] for tag in metadata
+            if tag.get('name') == 'robots'
+        ) == 'index, follow'
+
+        image = client.get('/static/images/og-studyhub.png')
+        assert image.status_code == 200
+        assert image.mimetype == 'image/png'
+
+        for internal_path in (
+            '/',
+            '/contact',
+            '/cookie-policy',
+            '/privacy-policy',
+            '/terms-of-service',
+        ):
+            assert client.get(internal_path).status_code == 200
+
+    privacy_html = client.get('/privacy-policy').get_data(as_text=True)
+    terms_html = client.get('/terms-of-service').get_data(as_text=True)
+    assert privacy_html != terms_html
+    assert 'one-time verification code' in privacy_html
+    assert 'password hashes' in privacy_html
+    assert 'third parties' in terms_html
+
+
 def test_social_metadata_never_uses_local_or_private_urls(feature_app):
     feature_app.config['PUBLIC_BASE_URL'] = 'https://localhost:5000'
     response = feature_app.test_client().get('/')

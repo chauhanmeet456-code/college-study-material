@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}Terms of Service - StudyHub{% endblock %}
+{% block content %}
+<article class="container py-5" style="max-width: 960px;" aria-labelledby="terms-title">
+    <header class="mb-4">
+        <h1 class="h2 fw-bold mb-2" id="terms-title">Terms of Service</h1>
+        <p class="text-secondary mb-2">These terms describe the basic rules for accessing and using StudyHub.</p>
+        <p class="small text-muted mb-0"><strong>Last updated:</strong> 6 November 2026</p>
+    </header>
+
+    <nav class="card mb-4" aria-label="Terms of Service contents">
+        <div class="card-body">
+            <h2 class="h5 fw-semibold">Contents</h2>
+            <ol class="mb-0">
+                <li><a href="#acceptance">Acceptance and service</a></li>
+                <li><a href="#accounts">Accounts and security</a></li>
+                <li><a href="#acceptable-use">Acceptable use</a></li>
+                <li><a href="#materials">Study materials and rights</a></li>
+                <li><a href="#user-content">User-provided content</a></li>
+                <li><a href="#copyright">Copyright concerns</a></li>
+                <li><a href="#availability">Availability and changes</a></li>
+                <li><a href="#suspension">Suspension and termination</a></li>
+                <li><a href="#disclaimer">Disclaimers and liability</a></li>
+                <li><a href="#changes-contact">Changes and contact</a></li>
+            </ol>
+        </div>
+    </nav>
+
+    <section class="card mb-4" id="acceptance" aria-labelledby="acceptance-title">
+        <div class="card-body">
+            <h2 class="h4 fw-semibold" id="acceptance-title">1. Acceptance and service</h2>
+            <p>By accessing or using StudyHub, you agree to these Terms of Service. If you do not agree, do not use account-only features. StudyHub provides a website for browsing college study materials, subjects, announcements, and related account features. These terms apply to your use of the website and its features.</p>
+            <p class="mb-0">StudyHub is a study resource, not a substitute for course instructions or advice from your institution. You are responsible for checking whether a resource is current and suitable for your academic use.</p>
+        </div>
+    </section>
+
+    <section class="card mb-4" id="accounts" aria-labelledby="accounts-title">
+        <div class="card-body">
+            <h2 class="h4 fw-semibold" id="accounts-title">2. Accounts and security</h2>
+            <p>Some features require an account. Provide information you are authorized to use and keep it reasonably accurate. Protect your password, email account, verification codes, and session cookie, and notify StudyHub through the <a href="{{ url_for('main.contact') }}">Contact page</a> if you suspect unauthorized access.</p>
+            <p class="mb-0">You may sign in using email and password with OTP verification, or Google sign-in when available. You are responsible for activity performed through your account, except where applicable law provides otherwise. Do not share or transfer your account to another person.</p>
+        </div>
+    </section>
+
+    <section class="card mb-4" id="acceptable-use" aria-labelledby="acceptable-use-title">
+        <div class="card-body">
+            <h2 class="h4 fw-semibold" id="acceptable-use-title">3. Acceptable use</h2>
+            <p>Use StudyHub lawfully and respectfully. You must not:</p>
+            <ul class="mb-0">
+                <li>Access accounts, systems, or data without authorization, or attempt to bypass access controls or usage limits.</li>
+                <li>Disrupt the website, probe or interfere with its security, or send malware, spam, or harmful code.</li>
+                <li>Impersonate another person, misrepresent your affiliation, or use the service to harass or harm others.</li>
+                <li>Copy, redistribute, sell, or otherwise use materials in a way that violates the rights of their owners or applicable rules.</li>
+                <li>Use automated access in a manner that overloads, disrupts, or circumvents controls on the service.</li>
+            </ul>
+        </div>
+    </section>
+
+    <section class="card mb-4" id="materials" aria-labelledby="materials-title">
+        <div class="card-body">
+            <h2 class="h4 fw-semibold" id="materials-title">4. Study materials and intellectual property</h2>
+            <p>StudyHub may display notes, books, assignments, practicals, question papers, and other educational resources. Materials may be provided by or belong to third parties. Their inclusion on the site does not mean StudyHub owns them or that their owners endorse StudyHub.</p>
+            <p class="mb-0">Copyright and other rights remain with their respective owners. Access a resource only for purposes permitted by its owner and applicable rules. Unless you have permission or another legal basis, do not reproduce, publish, distribute, sell, or create derivative copies of protected materials. The StudyHub name, site design, and original site content, where applicable, should not be used in a way that suggests endorsement or ownership of third-party resources.</p>
+        </div>
+    </section>
+
+    <section class="card mb-4" id="user-content" aria-labelledby="user-content-title">
+        <div class="card-body">
+            <h2 class="h4 fw-semibold" id="user-content-title">5. User-provided content</h2>
+            <p>Users may provide profile images and send messages through the contact form. You are responsible for having the rights and permissions needed to provide that content and for ensuring it is lawful and appropriate. Do not submit confidential information that is not needed to handle your request.</p>
+            <p class="mb-0">You retain any rights you have in content you provide. You allow StudyHub to store, display, and use it only as reasonably necessary to operate the relevant account or respond to the communication. Study materials themselves are managed through the StudyHub administrator interface; these terms do not grant users a right to upload materials to that interface.</p>
+        </div>
+    </section>
+
+    <section class="card mb-4" id="copyright" aria-labelledby="copyright-title">
+        <div class="card-body">
+            <h2 class="h4 fw-semibold" id="copyright-title">6. Copyright concerns</h2>
+            <p>If you believe material on StudyHub infringes your rights, contact us through the <a href="{{ url_for('main.contact') }}">Contact page</a>. Include the material’s page or URL, identify the work and the rights you hold, explain the concern, and provide information that allows us to respond. Do not include passwords, verification codes, or unnecessary sensitive information.</p>
+            <p class="mb-0">StudyHub may review a report and may restrict or remove material where appropriate. Submitting a report does not guarantee a particular outcome or response time.</p>
+        </div>
+    </section>
+
+    <section class="card mb-4" id="availability" aria-labelledby="availability-title">
+        <div class="card-body">
+            <h2 class="h4 fw-semibold" id="availability-title">7. Availability and changes</h2>
+            <p class="mb-0">StudyHub may update, suspend, or discontinue features, content, or parts of the site. Access may be interrupted for maintenance, security, provider, or other operational reasons. The site does not guarantee that every resource will always be available, complete, current, or error-free.</p>
+        </div>
+    </section>
+
+    <section class="card mb-4" id="suspension" aria-labelledby="suspension-title">
+        <div class="card-body">
+            <h2 class="h4 fw-semibold" id="suspension-title">8. Suspension and termination</h2>
+            <p>StudyHub may restrict or deactivate access when reasonably needed to protect the service, users, or rights holders, address suspected misuse, or comply with a request or legal obligation. You may stop using the site and may request account deletion through account settings; deletion is subject to the verification and processing steps described in the <a href="{{ url_for('main.privacy_policy') }}">Privacy Policy</a>.</p>
+            <p class="mb-0">Ending access does not automatically remove information already held in backups or other records, and some records may remain as described in the Privacy Policy.</p>
+        </div>
+    </section>
+
+    <section class="card mb-4" id="disclaimer" aria-labelledby="disclaimer-title">
+        <div class="card-body">
+            <h2 class="h4 fw-semibold" id="disclaimer-title">9. Disclaimers and liability</h2>
+            <p>StudyHub and its materials are provided on an “as available” basis. To the extent permitted by applicable law, StudyHub does not make an unconditional promise that the site will be uninterrupted or that educational materials will be accurate, complete, suitable for a particular course, or free of errors.</p>
+            <p class="mb-0">To the extent permitted by applicable law, StudyHub is not responsible for indirect or consequential loss arising from use of or inability to use the site. Nothing in these terms excludes a responsibility that cannot lawfully be excluded or limits rights that applicable law does not allow to be limited.</p>
+        </div>
+    </section>
+
+    <section class="card mb-4" id="changes-contact" aria-labelledby="changes-contact-title">
+        <div class="card-body">
+            <h2 class="h4 fw-semibold" id="changes-contact-title">10. Changes and contact</h2>
+            <p>StudyHub may revise these terms as the service changes. Updated terms will be posted on this page with a revised “Last updated” date. Continued use after an update means you have had an opportunity to review the revised terms; if you do not agree, stop using the service.</p>
+            <p class="mb-0">For questions, use the <a href="{{ url_for('main.contact') }}">StudyHub Contact page</a>. Review the <a href="{{ url_for('main.privacy_policy') }}">Privacy Policy</a> or return to the <a href="{{ url_for('main.index') }}">homepage</a>.</p>
+        </div>
+    </section>
+</article>
+{% endblock %}
