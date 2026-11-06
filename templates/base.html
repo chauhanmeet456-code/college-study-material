@@ -11,53 +11,9 @@
     <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com">
     <link rel="dns-prefetch" href="https://fonts.googleapis.com">
     <title>{% block title %}College Study Material{% endblock %}</title>
-    {% if seo.is_public_page %}
     {% set social_title = meta_title|default(self.title()|striptags|trim, true) %}
     {% set social_description = (meta_description|default(seo.default_meta_description, true))|plain_meta %}
-    {% set social_type = meta_type|default('website') %}
-    <meta name="description" content="{{ social_description }}">
-    {% if seo.canonical_url %}<link rel="canonical" href="{{ seo.canonical_url }}">{% endif %}
-    <meta property="og:title" content="{{ social_title }}">
-    <meta property="og:description" content="{{ social_description }}">
-    {% if seo.og_image_url %}
-    <meta property="og:image" content="{{ seo.og_image_url }}">
-    <meta property="og:image:width" content="1200">
-    <meta property="og:image:height" content="630">
-    {% endif %}
-    {% if seo.canonical_url %}<meta property="og:url" content="{{ seo.canonical_url }}">{% endif %}
-    <meta property="og:type" content="{{ social_type }}">
-    <meta property="og:site_name" content="{{ app_name }}">
-    <meta property="og:locale" content="en_US">
-    {% if seo.og_image_url %}
-    <meta name="twitter:card" content="summary_large_image">
-    {% else %}
-    <meta name="twitter:card" content="summary">
-    {% endif %}
-    <meta name="twitter:title" content="{{ social_title }}">
-    <meta name="twitter:description" content="{{ social_description }}">
-    {% if seo.og_image_url %}<meta name="twitter:image" content="{{ seo.og_image_url }}">{% endif %}
-    {% else %}
-    <meta name="robots" content="noindex, nofollow">
-    <meta property="og:title" content="{{ app_name }}">
-    <meta property="og:description" content="Study materials and course resources from StudyHub.">
-    {% if seo.og_image_url %}
-    <meta property="og:image" content="{{ seo.og_image_url }}">
-    <meta property="og:image:width" content="1200">
-    <meta property="og:image:height" content="630">
-    {% endif %}
-    {% if seo.canonical_url %}<meta property="og:url" content="{{ seo.canonical_url }}">{% endif %}
-    <meta property="og:type" content="website">
-    <meta property="og:site_name" content="{{ app_name }}">
-    <meta property="og:locale" content="en_US">
-    {% if seo.og_image_url %}
-    <meta name="twitter:card" content="summary_large_image">
-    {% else %}
-    <meta name="twitter:card" content="summary">
-    {% endif %}
-    <meta name="twitter:title" content="{{ app_name }}">
-    <meta name="twitter:description" content="Study materials and course resources from StudyHub.">
-    {% if seo.og_image_url %}<meta name="twitter:image" content="{{ seo.og_image_url }}">{% endif %}
-    {% endif %}
+    {% include "partials/social_metadata.html" %}
     {% block favicon %}
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicons/favicon.svg') }}">
     {% endblock %}

@@ -23,6 +23,8 @@ PUBLIC_ENDPOINTS = {
     'main.about',
     'main.cookie_policy',
     'main.contact',
+    'auth.login',
+    'auth.register',
 }
 
 PAGE_DESCRIPTIONS = {
@@ -42,6 +44,8 @@ PAGE_DESCRIPTIONS = {
     'main.about': 'Learn about StudyHub and its college study material resources.',
     'main.cookie_policy': 'Learn how StudyHub uses necessary and optional cookies.',
     'main.contact': 'Contact StudyHub for help with study materials and your account.',
+    'auth.login': 'Sign in to your StudyHub account to access your study materials.',
+    'auth.register': 'Create a StudyHub account to access notes, books, and course resources.',
 }
 
 
@@ -99,6 +103,8 @@ def _public_origin():
             )
         ):
             return ''
+        if not (current_app.testing or current_app.debug):
+            return ''
     elif parsed.scheme != 'https':
         return ''
 
@@ -141,7 +147,6 @@ def build_seo_context():
     else:
         path = url_for('main.index')
 
-    origin = _public_origin()
     image_filename = 'images/og-studyhub.png'
     image_path = url_for('static', filename=image_filename)
     image_file = os.path.join(
@@ -150,7 +155,7 @@ def build_seo_context():
     )
     return {
         'is_public_page': is_public,
-        'canonical_url': absolute_public_url(path),
+        'canonical_url': absolute_public_url(path) if is_public else '',
         'og_image_url': (
             absolute_public_url(image_path)
             if os.path.isfile(image_file)

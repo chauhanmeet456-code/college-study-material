@@ -267,11 +267,15 @@ Set `PUBLIC_BASE_URL` to the canonical production origin (for example,
 `https://studyhub.your-domain.tld`, without a path or trailing slash). StudyHub
 uses it to emit absolute canonical, Open Graph, Twitter/X, and preview-image
 URLs; it deliberately does not publish localhost or request-host URLs when the
-setting is absent or invalid. Put the default 1200 × 630 preview image at
+setting is absent or invalid in production. In local testing/debug, a loopback
+origin may be used for local rendering only; it is never accepted as a
+production canonical origin. Production must use the exact public HTTPS domain,
+not a localhost address or temporary development tunnel. Put the default
+1200 × 630 preview image at
 `static/images/og-studyhub.png`. Replace that file to customize the shared
 preview image. Public material and subject pages use their own titles and
-descriptions, while account/admin pages use generic metadata and are marked
-`noindex`.
+descriptions, and Login and Registration have dedicated metadata. Private
+account/admin pages use generic metadata and are marked `noindex`.
 
 ### Google sign-in setup
 

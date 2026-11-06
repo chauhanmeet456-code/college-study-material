@@ -498,6 +498,12 @@ def test_local_loopback_origin_renders_metadata_only_for_local_requests(
     monkeypatch.setitem(feature_app.config, 'DEBUG', False)
     client = feature_app.test_client()
 
+    production_html = client.get('/').get_data(as_text=True)
+    assert '<link rel="canonical"' not in production_html
+    assert 'property="og:image"' not in production_html
+    assert 'name="twitter:image"' not in production_html
+
+    monkeypatch.setitem(feature_app.config, 'DEBUG', True)
     local_html = client.get('/').get_data(as_text=True)
     assert '<link rel="canonical" href="http://127.0.0.1:5000/">' in local_html
     assert (
@@ -510,6 +516,7 @@ def test_local_loopback_origin_renders_metadata_only_for_local_requests(
         in local_html
     )
 
+    monkeypatch.setitem(feature_app.config, 'DEBUG', False)
     external_html = client.get(
         '/',
         environ_base={'REMOTE_ADDR': '203.0.113.10'},
@@ -518,6 +525,94 @@ def test_local_loopback_origin_renders_metadata_only_for_local_requests(
     assert '<link rel="canonical"' not in external_html
     assert 'property="og:image"' not in external_html
     assert 'name="twitter:image"' not in external_html
+
+
+def test_social_metadata_is_rendered_once_on_public_and_auth_pages(feature_app):
+    feature_app.config['PUBLIC_BASE_URL'] = 'https://studyhub.example'
+    client = feature_app.test_client()
+    routes = (
+        ('/', '/'),
+        ('/subjects', '/subjects'),
+        ('/subject/1', '/subject/1'),
+        ('/material/1', '/material/1'),
+        ('/notes', '/notes'),
+        ('/assignments', '/assignments'),
+        ('/books', '/books'),
+        ('/practicals', '/practicals'),
+        ('/question-papers', '/question-papers'),
+        ('/important-questions', '/important-questions'),
+        ('/syllabus', '/syllabus'),
+        ('/search?q=algebra', '/search'),
+        ('/about', '/about'),
+        ('/cookie-policy', '/cookie-policy'),
+        ('/contact', '/contact'),
+        ('/login', '/login'),
+        ('/register', '/register'),
+    )
+    required_properties = (
+        'og:title',
+        'og:description',
+        'og:image',
+        'og:url',
+        'og:type',
+        'og:site_name',
+    )
+
+    for path, canonical_path in routes:
+        response = client.get(path)
+        assert response.status_code == 200, path
+        html = response.get_data(as_text=True)
+        metadata = _metadata(response)
+        for property_name in required_properties:
+            tags = [
+                item for item in metadata
+                if item.get('property') == property_name
+            ]
+            assert len(tags) == 1, (path, property_name)
+        for name in (
+            'twitter:card',
+            'twitter:title',
+            'twitter:description',
+            'twitter:image',
+        ):
+            tags = [item for item in metadata if item.get('name') == name]
+            assert len(tags) == 1, (path, name)
+        assert (
+            f'<link rel="canonical" href="https://studyhub.example{canonical_path}">'
+            in html
+        )
+        assert (
+            '<meta property="og:image" '
+            'content="https://studyhub.example/static/images/og-studyhub.png">'
+            in html
+        )
+        assert (
+            '<meta name="twitter:card" content="summary_large_image">'
+            in html
+        )
+        assert (
+            '<meta name="twitter:image" '
+            'content="https://studyhub.example/static/images/og-studyhub.png">'
+            in html
+        )
+
+    login_meta = _metadata(client.get('/login'))
+    register_meta = _metadata(client.get('/register'))
+    assert next(item['content'] for item in login_meta if item.get('property') == 'og:title') == (
+        'Student Login - StudyHub'
+    )
+    assert next(
+        item['content'] for item in register_meta
+        if item.get('property') == 'og:title'
+    ) == 'Student Registration - StudyHub'
+
+    image = client.get('/static/images/og-studyhub.png')
+    assert image.status_code == 200
+    assert image.mimetype == 'image/png'
+    assert len(image.data) < 5 * 1024 * 1024
+    assert image.data[:8] == b'\x89PNG\r\n\x1a\n'
+    assert int.from_bytes(image.data[16:20], 'big') == 1200
+    assert int.from_bytes(image.data[20:24], 'big') == 630
 
 
 def test_social_metadata_escapes_content_and_hides_authenticated_page_data(feature_app):

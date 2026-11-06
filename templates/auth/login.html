@@ -10,6 +10,9 @@
     <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com">
     <link rel="dns-prefetch" href="https://fonts.googleapis.com">
     <title>{% block title %}Student Login - StudyHub{% endblock %}</title>
+    {% set social_title = "Student Login - StudyHub" %}
+    {% set social_description = "Sign in to your StudyHub account to access your study materials." %}
+    {% include "partials/social_metadata.html" %}
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicons/favicon-auth.svg') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/auth-oauth.css') }}">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
