@@ -152,6 +152,7 @@ class PooledConnection:
     def __init__(self, conn, pool):
         self._conn = conn
         self._pool = pool
+        self._closed = False
 
     def __getattr__(self, name):
         return getattr(self._conn, name)
@@ -160,14 +161,25 @@ class PooledConnection:
         return self._conn.cursor()
 
     def close(self):
+        if self._closed:
+            return
+        self._closed = True
         if self._pool is not None:
             self._pool.put(self._conn)
         else:
-            self._conn.close()
+            try:
+                self._conn.close()
+            except Exception:
+                pass
 
     @property
     def closed(self):
-        return False
+        if self._closed:
+            return True
+        try:
+            return bool(self._conn.closed)
+        except Exception:
+            return True
 
 
 class PostgreSQLConnectionPool:
@@ -186,25 +198,19 @@ class PostgreSQLConnectionPool:
 
     def get(self):
         pool = getattr(_tls, "pg_pool", None)
-        if pool:
-            for _ in range(len(pool)):
-                conn = pool.pop()
-                # Lightweight status check (no network round-trip)
-                try:
-                    if conn.pgconn.status == 0:
-                        return conn
-                    else:
-                        conn.close()
-                except Exception:
-                    try:
-                        conn.close()
-                    except Exception:
-                        pass
-            _tls.pg_pool = None
+        while pool:
+            conn = pool.pop()
+            if self._prepare_for_reuse(conn):
+                return conn
+            self._discard(conn)
 
         return self._create_connection()
 
     def put(self, conn):
+        if not self._reset_transaction(conn):
+            self._discard(conn)
+            return
+
         pool = getattr(_tls, "pg_pool", None)
         if pool is None:
             pool = []
@@ -212,10 +218,76 @@ class PostgreSQLConnectionPool:
         if len(pool) < self._max_per_thread:
             pool.append(conn)
         else:
-            try:
-                conn.close()
-            except Exception:
-                pass
+            self._discard(conn)
+
+    @staticmethod
+    def _is_open(conn):
+        try:
+            return (
+                not conn.closed
+                and conn.pgconn.status == psycopg.pq.ConnStatus.OK
+            )
+        except Exception:
+            return False
+
+    @classmethod
+    def _transaction_is_idle(cls, conn):
+        try:
+            return (
+                conn.pgconn.transaction_status
+                == psycopg.pq.TransactionStatus.IDLE
+            )
+        except Exception:
+            return False
+
+    @classmethod
+    def _reset_transaction(cls, conn):
+        if not cls._is_open(conn):
+            return False
+        try:
+            if not cls._transaction_is_idle(conn):
+                conn.rollback()
+            return cls._is_open(conn) and cls._transaction_is_idle(conn)
+        except Exception as exc:
+            _transaction_logger.warning(
+                "PostgreSQL connection reset failed (%s)",
+                type(exc).__name__,
+            )
+            return False
+
+    @classmethod
+    def _prepare_for_reuse(cls, conn):
+        if not cls._reset_transaction(conn):
+            return False
+        cursor = None
+        try:
+            cursor = conn.execute("SELECT 1")
+            return_value = cursor.fetchone()
+            if return_value is None:
+                return False
+            if cursor is not None:
+                cursor.close()
+                cursor = None
+            return cls._reset_transaction(conn)
+        except Exception as exc:
+            _transaction_logger.info(
+                "Discarding unusable PostgreSQL connection (%s)",
+                type(exc).__name__,
+            )
+            return False
+        finally:
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+
+    @staticmethod
+    def _discard(conn):
+        try:
+            conn.close()
+        except Exception:
+            pass
 
     @staticmethod
     def _create_connection():

@@ -111,7 +111,7 @@ def index():
                            total_subjects=total_subjects, total_materials=total_materials,
                            total_notes=total_notes, total_students=total_students,
                            current_user=get_current_user(),
-                           meta_title='StudyHub - 3rd Year Study Materials',
+                           meta_title='StudyHub - College Study Materials, Notes & Resources',
                            meta_description=(
                                'Access notes, assignments, books, practicals, '
                                'question papers and more for your course.'

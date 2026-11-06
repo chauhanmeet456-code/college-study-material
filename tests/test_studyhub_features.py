@@ -416,19 +416,29 @@ def test_homepage_autocomplete_is_only_on_hero_and_uses_active_suggestions(featu
 
 
 def test_public_pages_have_absolute_page_specific_social_metadata(feature_app):
-    feature_app.config['PUBLIC_BASE_URL'] = 'https://studyhub.example'
+    production_origin = 'https://college-study-material.onrender.com'
+    feature_app.config['PUBLIC_BASE_URL'] = production_origin
     client = feature_app.test_client()
     homepage_response = client.get('/')
     homepage_html = homepage_response.get_data(as_text=True)
     homepage_meta = _metadata(homepage_response)
-    assert '<link rel="canonical" href="https://studyhub.example/">' in homepage_html
+    homepage_title = next(
+        line.split('<title>', 1)[1].split('</title>', 1)[0]
+        for line in homepage_html.splitlines()
+        if '<title>' in line
+    )
+    assert homepage_title == (
+        'StudyHub - College Study Materials, Notes &amp; Resources'
+    )
+    assert 50 <= len(homepage_title.replace('&amp;', '&')) <= 60
+    expected_image_url = production_origin + '/static/images/og-studyhub.png'
+    assert f'<link rel="canonical" href="{production_origin}/">' in homepage_html
     assert (
-        '<meta property="og:url" content="https://studyhub.example/">' 
+        f'<meta property="og:url" content="{production_origin}/">'
         in homepage_html
     )
     assert (
-        '<meta property="og:image" '
-        'content="https://studyhub.example/static/images/og-studyhub.png">'
+        f'<meta property="og:image" content="{expected_image_url}">'
         in homepage_html
     )
     assert (
@@ -436,28 +446,49 @@ def test_public_pages_have_absolute_page_specific_social_metadata(feature_app):
         in homepage_html
     )
     assert (
-        '<meta name="twitter:image" '
-        'content="https://studyhub.example/static/images/og-studyhub.png">'
+        f'<meta name="twitter:image" content="{expected_image_url}">'
         in homepage_html
     )
+    assert homepage_html.count('property="og:image"') == 1
+    assert homepage_html.count('name="twitter:image"') == 1
+    assert expected_image_url.startswith('https://')
+    assert expected_image_url in homepage_html
     og_meta = [
         item for item in homepage_meta
         if item.get('property', '').startswith('og:')
     ]
     assert len([item for item in og_meta if item.get('property') == 'og:title']) == 1
     assert next(item['content'] for item in og_meta if item.get('property') == 'og:title') == (
-        'StudyHub - 3rd Year Study Materials'
+        'StudyHub - College Study Materials, Notes & Resources'
     )
     assert next(item['content'] for item in og_meta if item.get('property') == 'og:url') == (
-        'https://studyhub.example/'
+        production_origin + '/'
     )
     assert next(item['content'] for item in og_meta if item.get('property') == 'og:image') == (
-        'https://studyhub.example/static/images/og-studyhub.png'
+        expected_image_url
     )
+    assert sum(item.get('property') == 'og:description' for item in og_meta) == 1
+    assert sum(item.get('property') == 'og:type' for item in og_meta) == 1
+    assert sum(item.get('property') == 'og:site_name' for item in og_meta) == 1
+    assert sum(item.get('property') == 'og:image:width' for item in og_meta) == 1
+    assert sum(item.get('property') == 'og:image:height' for item in og_meta) == 1
+    assert sum(item.get('property') == 'og:image:alt' for item in og_meta) == 1
+    for twitter_name in (
+        'twitter:card', 'twitter:title', 'twitter:description', 'twitter:image',
+        'twitter:image:alt',
+    ):
+        assert sum(item.get('name') == twitter_name for item in homepage_meta) == 1
     assert next(
         item['content'] for item in homepage_meta
         if item.get('name') == 'twitter:card'
     ) == 'summary_large_image'
+    image = client.get('/static/images/og-studyhub.png')
+    assert image.status_code == 200
+    assert image.mimetype == 'image/png'
+    assert len(image.data) < 5 * 1024 * 1024
+    assert image.data[:8] == b'\x89PNG\r\n\x1a\n'
+    assert int.from_bytes(image.data[16:20], 'big') == 1200
+    assert int.from_bytes(image.data[20:24], 'big') == 630
 
     material_meta = _metadata(client.get('/material/1'))
     assert next(
@@ -467,7 +498,7 @@ def test_public_pages_have_absolute_page_specific_social_metadata(feature_app):
     assert next(
         item['content'] for item in material_meta
         if item.get('property') == 'og:url'
-    ) == 'https://studyhub.example/material/1'
+    ) == production_origin + '/material/1'
 
     subject_meta = _metadata(client.get('/subject/1'))
     assert next(
@@ -478,7 +509,7 @@ def test_public_pages_have_absolute_page_specific_social_metadata(feature_app):
     assert next(
         item['content'] for item in notes_meta
         if item.get('property') == 'og:url'
-    ) == 'https://studyhub.example/notes'
+    ) == production_origin + '/notes'
 
 
 def test_legal_pages_are_public_linked_and_have_complete_unique_metadata(feature_app):
