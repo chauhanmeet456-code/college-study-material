@@ -431,6 +431,13 @@ def test_public_pages_have_absolute_page_specific_social_metadata(feature_app):
         'StudyHub - College Study Materials, Notes &amp; Resources'
     )
     assert 50 <= len(homepage_title.replace('&amp;', '&')) <= 60
+    assert next(
+        item['content'] for item in homepage_meta
+        if item.get('name') == 'description'
+    ) == (
+        'Access college study materials, notes, assignments, books, practicals '
+        'and question papers in one place with StudyHub.'
+    )
     expected_image_url = production_origin + '/static/images/og-studyhub.png'
     assert f'<link rel="canonical" href="{production_origin}/">' in homepage_html
     assert (
@@ -709,8 +716,8 @@ def test_social_metadata_is_rendered_once_on_public_and_auth_pages(feature_app):
         ('/about', '/about'),
         ('/cookie-policy', '/cookie-policy'),
         ('/contact', '/contact'),
-        ('/login', '/login'),
-        ('/register', '/register'),
+        ('/privacy-policy', '/privacy-policy'),
+        ('/terms-of-service', '/terms-of-service'),
     )
     required_properties = (
         'og:title',
@@ -732,6 +739,10 @@ def test_social_metadata_is_rendered_once_on_public_and_auth_pages(feature_app):
                 if item.get('property') == property_name
             ]
             assert len(tags) == 1, (path, property_name)
+        assert sum(item.get('name') == 'description' for item in metadata) == 1
+        assert sum(
+            '<link rel="canonical"' in line for line in html.splitlines()
+        ) == 1
         for name in (
             'twitter:card',
             'twitter:title',
@@ -744,6 +755,10 @@ def test_social_metadata_is_rendered_once_on_public_and_auth_pages(feature_app):
             f'<link rel="canonical" href="https://studyhub.example{canonical_path}">'
             in html
         )
+        assert sum(item.get('name') == 'robots' for item in metadata) == 1
+        assert next(
+            item['content'] for item in metadata if item.get('name') == 'robots'
+        ) == 'index, follow'
         assert (
             '<meta property="og:image" '
             'content="https://studyhub.example/static/images/og-studyhub.png">'
@@ -759,16 +774,6 @@ def test_social_metadata_is_rendered_once_on_public_and_auth_pages(feature_app):
             in html
         )
 
-    login_meta = _metadata(client.get('/login'))
-    register_meta = _metadata(client.get('/register'))
-    assert next(item['content'] for item in login_meta if item.get('property') == 'og:title') == (
-        'Student Login - StudyHub'
-    )
-    assert next(
-        item['content'] for item in register_meta
-        if item.get('property') == 'og:title'
-    ) == 'Student Registration - StudyHub'
-
     image = client.get('/static/images/og-studyhub.png')
     assert image.status_code == 200
     assert image.mimetype == 'image/png'
@@ -776,6 +781,80 @@ def test_social_metadata_is_rendered_once_on_public_and_auth_pages(feature_app):
     assert image.data[:8] == b'\x89PNG\r\n\x1a\n'
     assert int.from_bytes(image.data[16:20], 'big') == 1200
     assert int.from_bytes(image.data[20:24], 'big') == 630
+
+
+def test_private_pages_are_noindex_and_have_no_public_canonical_or_image(feature_app):
+    from flask import render_template
+
+    feature_app.config['PUBLIC_BASE_URL'] = 'https://studyhub.example'
+    client = feature_app.test_client()
+
+    private_paths = ('/login', '/register', '/forgot-password', '/admin/login')
+    for path in private_paths:
+        response = client.get(path)
+        assert response.status_code == 200, path
+        html = response.get_data(as_text=True)
+        metadata = _metadata(response)
+        robots = [item for item in metadata if item.get('name') == 'robots']
+        assert len(robots) == 1, path
+        assert robots[0]['content'] == 'noindex, nofollow', path
+        assert not any(
+            'canonical' in line or 'property="og:image"' in line
+            for line in html.splitlines()
+        ), path
+
+    with client.session_transaction() as current:
+        current['forgot_email'] = 'one@example.test'
+    reset_response = client.get('/reset-password')
+    assert reset_response.status_code == 200
+    assert next(
+        item['content'] for item in _metadata(reset_response)
+        if item.get('name') == 'robots'
+    ) == 'noindex, nofollow'
+
+    with feature_app.test_request_context('/admin/dashboard'):
+        admin_html = render_template('admin/base.html', admin={'name': 'Admin'})
+    admin_metadata = _MetaParser()
+    admin_metadata.feed(admin_html)
+    assert sum(
+        item.get('name') == 'robots' for item in admin_metadata.meta
+    ) == 1
+    assert next(
+        item['content'] for item in admin_metadata.meta
+        if item.get('name') == 'robots'
+    ) == 'noindex, nofollow'
+
+    _session(client)
+    for path in ('/notifications', '/account/login-history'):
+        response = client.get(path)
+        assert response.status_code == 200, path
+        metadata = _metadata(response)
+        assert sum(item.get('name') == 'robots' for item in metadata) == 1, path
+        assert next(
+            item['content'] for item in metadata if item.get('name') == 'robots'
+        ) == 'noindex, nofollow', path
+
+
+def test_social_metadata_renders_with_missing_seo_context(feature_app):
+    from flask import render_template_string
+
+    for seo_value in (None, []):
+        with feature_app.test_request_context('/'):
+            html = render_template_string(
+                '{% include "partials/social_metadata.html" %}',
+                seo=seo_value,
+            )
+
+        metadata = _MetaParser()
+        metadata.feed(html)
+        assert sum(item.get('name') == 'description' for item in metadata.meta) == 1
+        assert sum(item.get('name') == 'robots' for item in metadata.meta) == 1
+        assert next(
+            item['content'] for item in metadata.meta if item.get('name') == 'robots'
+        ) == 'noindex, nofollow'
+        assert 'StudyHub' in html
+        assert 'canonical' not in html
+        assert 'og:image' not in html
 
 
 def test_social_metadata_escapes_content_and_hides_authenticated_page_data(feature_app):

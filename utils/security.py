@@ -14,6 +14,7 @@ import logging
 import secrets
 import time
 from functools import wraps
+from urllib.parse import urlsplit, urlunsplit
 
 from flask import (
     abort,
@@ -33,6 +34,29 @@ CSRF_HEADER_NAME = 'X-CSRF-Token'
 DEVICE_COOKIE_NAME = 'studyhub_device_id'
 
 _logger = logging.getLogger('studyhub.security')
+
+
+def safe_redirect_target(target, fallback='/'):
+    """Return a same-origin redirect target or a trusted local fallback."""
+    if not isinstance(target, str) or not target or '\\' in target:
+        return fallback
+    if any(ord(char) < 32 or ord(char) == 127 for char in target):
+        return fallback
+
+    try:
+        parsed = urlsplit(target)
+    except ValueError:
+        return fallback
+
+    if parsed.scheme or parsed.netloc:
+        if parsed.scheme not in ('http', 'https') or parsed.netloc.lower() != request.host.lower():
+            return fallback
+        target = urlunsplit(('', '', parsed.path or '/', parsed.query, parsed.fragment))
+        parsed = urlsplit(target)
+
+    if not parsed.path.startswith('/') or parsed.path.startswith('//'):
+        return fallback
+    return target
 
 
 def generate_csrf_token():
@@ -84,7 +108,14 @@ def csrf_protect(view):
                 if request.is_json or request.headers.get('Accept') == 'application/json':
                     return {'success': False, 'message': 'Invalid or expired CSRF token.'}, 400
                 flash('Your session security check failed. Please try again.', 'danger')
-                next_url = request.form.get('next') or request.referrer or url_for('main.index')
+                fallback = safe_redirect_target(
+                    request.referrer,
+                    url_for('main.index'),
+                )
+                next_url = safe_redirect_target(
+                    request.form.get('next'),
+                    fallback,
+                )
                 return redirect(next_url)
         return view(*args, **kwargs)
 

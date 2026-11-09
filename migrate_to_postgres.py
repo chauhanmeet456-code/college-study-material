@@ -1,279 +1,555 @@
-"""Migrate existing data from SQLite to PostgreSQL (NeonDB).
+"""Safely migrate an existing SQLite database into a PostgreSQL schema.
 
-This script reads data from `instance/college_study.sqlite` and transfers it
-to the PostgreSQL database specified by `DATABASE_URL`. It preserves primary
-keys and foreign key relationships.
-
-Usage:
-    python migrate_to_postgres.py           # Migrate (skips existing rows)
-    python migrate_to_postgres.py --reset   # Wipe target tables first, then migrate
-
-Safety features:
-- Never drops tables
-- With --reset: deletes all data in target tables (in reverse dependency order)
-- Without --reset: uses INSERT ... ON CONFLICT (DO NOTHING) to avoid duplicates
-- Resets PostgreSQL sequences after inserting explicit IDs
-- Skips rows that would violate foreign key constraints (orphaned references)
-- Reports source and destination record counts for verification
+The default mode validates the source, target connection, and destination
+schema without writing data. Use --apply to migrate. Production writes require
+--target production and --confirm-production. The source SQLite file is opened
+read-only and is never modified.
 """
 
+import argparse
+import hashlib
+import json
 import os
-import sys
 import sqlite3
+import sys
+from datetime import date, datetime
+from pathlib import Path
+from urllib.parse import urlsplit
+
 import psycopg
-from config import Config
+from psycopg.types.json import Jsonb
+
+from config import Config, _normalize_postgres_url
 
 
-# Tables to migrate, in dependency order (parent tables first).
-TABLES_IN_ORDER = [
-    'users',
-    'admins',
-    'categories',
-    'subjects',
-    'materials',
-    'favorites',
-    'contact_messages',
-    'announcements',
-    'guest_views',
-    'guest_downloads',
-    'settings',
-    'user_sessions',
-    'login_history',
-    'failed_login_attempts',
-    'admin_audit_log',
-]
+TABLES_IN_ORDER = (
+    "users",
+    "admins",
+    "categories",
+    "subjects",
+    "materials",
+    "favorites",
+    "contact_messages",
+    "announcements",
+    "guest_views",
+    "guest_downloads",
+    "settings",
+    "user_sessions",
+    "login_history",
+    "failed_login_attempts",
+    "admin_audit_log",
+    "pending_notifications",
+    "user_oauth_accounts",
+    "user_notifications",
+)
 
 
-def get_sqlite_conn():
-    """Connect to the source SQLite database (read-only)."""
-    db_path = Config.SQLITE_DB
-    if not os.path.exists(db_path):
-        print(f"ERROR: SQLite database not found at {db_path}")
-        sys.exit(1)
+def _is_loopback(host):
+    return (host or "").lower() in {"localhost", "127.0.0.1", "::1"}
 
-    conn = sqlite3.connect(f'file:{db_path}?mode=ro', uri=True)
+
+def resolve_target_url(target, environ=None):
+    """Return a validated migration target URL without printing its contents."""
+    environ = os.environ if environ is None else environ
+    is_render = (
+        str(environ.get("RENDER", "")).strip().lower() in {"1", "true", "yes", "on"}
+        or bool(environ.get("RENDER_SERVICE_ID"))
+    )
+    if is_render and target != "production":
+        return None, "Render migration commands must explicitly select --target production."
+
+    if target == "production":
+        value = environ.get("DATABASE_URL")
+        if not value:
+            return None, "Production migration target requires DATABASE_URL."
+    else:
+        value = environ.get("DEV_DATABASE_URL") or environ.get("LOCAL_DATABASE_URL")
+        if not value:
+            return (
+                None,
+                "Local PostgreSQL migration target requires DEV_DATABASE_URL or "
+                "LOCAL_DATABASE_URL; a remote DATABASE_URL is never selected locally.",
+            )
+
+    normalized, error = _normalize_postgres_url(value)
+    if error:
+        return None, error
+    if target == "development" and not _is_loopback(urlsplit(normalized).hostname):
+        return None, (
+            "Development migration target must be a loopback PostgreSQL URL. "
+            "Use --target production with explicit confirmation for production."
+        )
+    return normalized, None
+
+
+def open_sqlite_readonly(db_path):
+    """Open an existing SQLite source without creating or changing it."""
+    path = Path(db_path).expanduser().resolve()
+    if not path.is_file():
+        raise FileNotFoundError("SQLite source database does not exist: {}".format(path))
+    conn = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     return conn
 
 
-def get_postgres_conn():
-    """Connect to the PostgreSQL (NeonDB) database."""
-    if not Config.USE_POSTGRES:
-        print("ERROR: DATABASE_URL is not set in .env")
-        print("Configure DATABASE_URL with your NeonDB PostgreSQL connection string.")
-        sys.exit(1)
+def open_postgres(target_url):
+    """Connect and validate PostgreSQL before migration work starts."""
+    parsed = urlsplit(target_url)
+    options = {
+        "connect_timeout": Config.DB_CONNECT_TIMEOUT,
+        "application_name": "studyhub-migration",
+    }
+    if not parsed.query or "sslmode=" not in parsed.query.lower():
+        options["sslmode"] = "prefer" if _is_loopback(parsed.hostname) else "require"
 
-    conn = psycopg.connect(Config.DATABASE_URL)
-    return conn
-
-
-def count_rows(conn, table, is_pg=False):
-    """Count rows in a table."""
-    cursor = conn.cursor()
-    cursor.execute(f'SELECT COUNT(*) FROM "{table}"')
-    count = cursor.fetchone()[0]
-    cursor.close()
-    return count
-
-
-def fetch_all_rows(sqlite_conn, table):
-    """Fetch all rows from a SQLite table."""
-    cursor = sqlite_conn.cursor()
-    cursor.execute(f'SELECT * FROM "{table}"')
-    rows = cursor.fetchall()
-    return rows, [desc[0] for desc in cursor.description]
-
-
-def reset_sequence(pg_conn, table):
-    """Reset the SERIAL sequence for a table after inserting explicit IDs."""
-    cursor = pg_conn.cursor()
     try:
+        conn = psycopg.connect(target_url, **options)
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            if cursor.fetchone() != (1,):
+                raise RuntimeError("PostgreSQL validation query returned an unexpected result.")
+        conn.rollback()
+        return conn
+    except psycopg.Error as exc:
+        raise RuntimeError(_safe_postgres_error(exc)) from None
+
+
+def _safe_postgres_error(exc):
+    message = str(exc).lower()
+    if "getaddrinfo" in message or "name or service not known" in message:
+        return "PostgreSQL host name could not be resolved. Check network/DNS and the configured target."
+    if "timeout" in message or "timed out" in message:
+        return "PostgreSQL connection timed out. Check target availability and network access."
+    if "password authentication failed" in message or "authentication failed" in message:
+        return "PostgreSQL authentication failed. Verify the target credentials in the selected environment variable."
+    if "connection refused" in message or "could not connect" in message:
+        return "PostgreSQL refused or could not accept the connection. Verify host, port, and server status."
+    return "PostgreSQL connection failed ({}). Check target configuration and server logs.".format(
+        type(exc).__name__
+    )
+
+
+def sqlite_tables(conn):
+    rows = conn.execute(
+        "SELECT name FROM sqlite_master "
+        "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+    ).fetchall()
+    existing = {row["name"] for row in rows}
+    return [table for table in TABLES_IN_ORDER if table in existing], sorted(
+        existing.difference(TABLES_IN_ORDER)
+    )
+
+
+def source_counts(conn, tables):
+    counts = {}
+    for table in tables:
+        counts[table] = conn.execute(
+            'SELECT COUNT(*) FROM "{}"'.format(table.replace('"', '""'))
+        ).fetchone()[0]
+    return counts
+
+
+def postgres_columns(conn, table):
+    with conn.cursor() as cursor:
         cursor.execute(
-            f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), "
-            f"(SELECT MAX(id) FROM {table}))"
+            "SELECT column_name, data_type, udt_name "
+            "FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = %s",
+            (table,),
         )
-    except psycopg.Error:
-        pass  # table might be empty or sequence issues
-    cursor.close()
+        return {
+            row[0]: {"data_type": row[1], "udt_name": row[2]}
+            for row in cursor.fetchall()
+        }
 
 
-def truncate_pg_tables(pg_conn, should_truncate=False):
-    """Check that target tables are empty.
+def migration_column_pairs(table, source_columns, destination_columns):
+    """Map source columns to compatible destination columns."""
+    pairs = []
+    for source_column in source_columns:
+        if (
+            table == "user_oauth_accounts"
+            and source_column == "provider_subject"
+            and "provider_subject_hash" in source_columns
+            and "provider_subject_hash" in destination_columns
+            and "provider_subject" not in destination_columns
+        ):
+            continue
+        destination_column = source_column
+        if (
+            table == "user_oauth_accounts"
+            and source_column == "provider_subject"
+            and "provider_subject_hash" not in source_columns
+            and "provider_subject_hash" in destination_columns
+            and "provider_subject" not in destination_columns
+        ):
+            destination_column = "provider_subject_hash"
+        pairs.append((source_column, destination_column))
+    return pairs
 
-    If should_truncate is True, all data in target tables is deleted (in reverse
-    dependency order) before migration starts.
-    """
-    cursor = pg_conn.cursor()
-    warnings = []
 
-    if should_truncate:
-        print("-- Resetting target tables (deleting all data) --")
-        for table in reversed(TABLES_IN_ORDER):
-            try:
-                cursor.execute(f'DELETE FROM "{table}"')
-            except psycopg.Error:
-                pass  # table might not exist
-        pg_conn.commit()
-        print("-- Tables reset complete --\n")
-        cursor.close()
-        return
+def _migration_value(table, source_column, destination_column, value, type_info):
+    if (
+        table == "user_oauth_accounts"
+        and source_column == "provider_subject"
+        and destination_column == "provider_subject_hash"
+        and value is not None
+    ):
+        value = hashlib.sha256(str(value).encode("utf-8")).hexdigest()
+    return _convert_value(value, type_info)
 
-    for table in TABLES_IN_ORDER:
+
+def validate_destination_schema(sqlite_conn, pg_conn, tables):
+    problems = []
+    destination_counts = {}
+    type_maps = {}
+    for table in tables:
+        source_columns = {
+            row[1]
+            for row in sqlite_conn.execute(
+                'PRAGMA table_info("{}")'.format(table.replace('"', '""'))
+            ).fetchall()
+        }
         try:
-            ct = count_rows(pg_conn, table, is_pg=True)
-            if ct > 0:
-                warnings.append(f"  - {table}: {ct} rows (will use ON CONFLICT to skip)")
+            dest_columns = postgres_columns(pg_conn, table)
+            with pg_conn.cursor() as cursor:
+                cursor.execute('SELECT COUNT(*) FROM "{}"'.format(table))
+                destination_counts[table] = cursor.fetchone()[0]
         except psycopg.Error:
-            warnings.append(f"  - {table}: table does not exist yet")
-
-    if warnings:
-        print("\nPostgreSQL table status (existing data will NOT be deleted):")
-        for w in warnings:
-            print(w)
-    cursor.close()
-
-
-def migrate_table(sqlite_conn, pg_conn, table):
-    """Migrate a single table from SQLite to PostgreSQL using batch insert.
-
-    Uses executemany for performance. Skips rows that would violate foreign
-    key constraints (orphaned references).
-    """
-    rows, columns = fetch_all_rows(sqlite_conn, table)
-    source_count = len(rows)
-
-    if source_count == 0:
-        print(f"  {table}: 0 rows (skipped)")
-        return 0, 0
-
-    col_names = ', '.join(f'"{c}"' for c in columns)
-    placeholders = ', '.join(['%s'] * len(columns))
-
-    # Prepare all values
-    all_values = []
-    for row in rows:
-        values = []
-        for col in columns:
-            val = row[col]
-            # Convert sqlite3.Row to native Python types
-            if hasattr(val, 'decode'):
-                val = val.decode('utf-8', errors='replace')
-            values.append(val)
-        all_values.append(tuple(values))
-
-    cursor = pg_conn.cursor()
-    inserted = 0
-    skipped_fk = 0
-
-    # First try bulk insert with ON CONFLICT
-    try:
-        cursor.executemany(
-            f'INSERT INTO "{table}" ({col_names}) VALUES ({placeholders}) '
-            f'ON CONFLICT DO NOTHING',
-            all_values
+            pg_conn.rollback()
+            problems.append("{}: destination table missing or unreadable".format(table))
+            continue
+        column_pairs = migration_column_pairs(table, source_columns, dest_columns)
+        missing = sorted(
+            destination_column
+            for _, destination_column in column_pairs
+            if destination_column not in dest_columns
         )
-        inserted = cursor.rowcount
-    except psycopg.Error as e:
-        pg_conn.rollback()
-        cursor.close()
-        # If bulk insert fails, fall back to row-by-row with FK handling
-        cursor = pg_conn.cursor()
-        for values in all_values:
-            try:
-                cursor.execute(
-                    f'INSERT INTO "{table}" ({col_names}) VALUES ({placeholders}) '
-                    f'ON CONFLICT DO NOTHING',
-                    values
+        if missing:
+            problems.append(
+                "{}: destination is missing source columns ({})".format(
+                    table, ", ".join(missing)
                 )
-                if cursor.rowcount > 0:
-                    inserted += 1
-            except psycopg.Error as e2:
-                if 'violates foreign key constraint' in str(e2):
-                    skipped_fk += 1
-                    pg_conn.rollback()
-                else:
-                    pg_conn.rollback()
-        pg_conn.commit()
-
-    pg_conn.commit()
-    cursor.close()
-
-    if 'id' in columns and inserted > 0:
-        reset_sequence(pg_conn, table)
-
-    if skipped_fk:
-        print(f"  ({skipped_fk} rows skipped due to missing FKs)")
-
-    return source_count, inserted
+            )
+        type_maps[table] = dest_columns
+    return problems, destination_counts, type_maps
 
 
-def verify_migration(sqlite_conn, pg_conn):
-    """Verify that source and destination record counts match."""
-    print("\n--- Verification ---")
-    all_match = True
-    for table in TABLES_IN_ORDER:
-        source = count_rows(sqlite_conn, table)
+def _convert_value(value, type_info):
+    if value is None:
+        return None
+    data_type = type_info["data_type"]
+    udt_name = type_info["udt_name"]
+    if data_type == "boolean":
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "t", "yes", "on"}
+        return bool(value)
+    if data_type == "date" and isinstance(value, str):
+        return date.fromisoformat(value[:10])
+    if data_type.startswith("timestamp") and isinstance(value, str):
+        text = value.strip().replace("Z", "+00:00")
         try:
-            dest = count_rows(pg_conn, table, is_pg=True)
-        except psycopg.Error:
-            dest = -1
-        match = "MATCH" if source == dest else "MISMATCH"
-        if source != dest:
-            all_match = False
-        print(f"  {table}: source={source}, dest={dest} [{match}]")
-    return all_match
+            return datetime.fromisoformat(text)
+        except ValueError:
+            return datetime.strptime(text, "%Y-%m-%d %H:%M:%S")
+    if udt_name in ("json", "jsonb") and isinstance(value, str):
+        return Jsonb(json.loads(value))
+    if data_type in ("text", "character varying", "character") and isinstance(value, (int, float)):
+        return str(value)
+    return value
 
 
-def main():
-    print("=" * 70)
-    print("StudyHub SQLite to PostgreSQL Migration Script")
-    print("=" * 70)
+def migrate_table(sqlite_conn, pg_conn, table, column_types):
+    cursor = sqlite_conn.execute('SELECT * FROM "{}"'.format(table.replace('"', '""')))
+    source_columns = [description[0] for description in cursor.description]
+    column_pairs = migration_column_pairs(table, source_columns, column_types)
+    rows = cursor.fetchall()
+    if not rows:
+        return {"source": 0, "inserted": 0, "conflicts": 0, "fk_skipped": 0, "errors": 0}
 
-    # Safety: ensure the source SQLite file is not the same as PG
-    print(f"\nSource SQLite: {Config.SQLITE_DB}")
-    if not os.path.exists(Config.SQLITE_DB):
-        print(f"ERROR: SQLite database not found at {Config.SQLITE_DB}")
-        sys.exit(1)
+    destination_columns = [destination for _, destination in column_pairs]
+    quoted_columns = ", ".join(
+        '"{}"'.format(name.replace('"', '""')) for name in destination_columns
+    )
+    placeholders = ", ".join(["%s"] * len(destination_columns))
+    query = (
+        'INSERT INTO "{}" ({}) VALUES ({}) ON CONFLICT DO NOTHING'
+        .format(table, quoted_columns, placeholders)
+    )
+    counts = {
+        "source": len(rows),
+        "inserted": 0,
+        "conflicts": 0,
+        "fk_skipped": 0,
+        "errors": 0,
+    }
 
-    sqlite_conn = get_sqlite_conn()
-    pg_conn = get_postgres_conn()
-
-    print(f"PostgreSQL: connected to DB successfully")
-
-    # Check for --reset flag to allow cleaning partial migrations
-    should_reset = '--reset' in sys.argv
-
-    # Check current PG state
-    truncate_pg_tables(pg_conn, should_reset)
-
-    print("\n--- Starting Migration ---")
-
-    total_source = 0
-    total_inserted = 0
-
-    for table in TABLES_IN_ORDER:
-        source_count, inserted = migrate_table(sqlite_conn, pg_conn, table)
-        total_source += source_count
-        total_inserted += inserted
+    try:
+        with pg_conn.cursor() as pg_cursor:
+            for row_number, row in enumerate(rows, 1):
+                values = tuple(
+                    _migration_value(
+                        table,
+                        source_column,
+                        destination_column,
+                        row[source_column],
+                        column_types[destination_column],
+                    )
+                    for source_column, destination_column in column_pairs
+                )
+                pg_cursor.execute("SAVEPOINT studyhub_migration_row")
+                try:
+                    pg_cursor.execute(query, values)
+                    if pg_cursor.rowcount:
+                        counts["inserted"] += 1
+                    else:
+                        counts["conflicts"] += 1
+                    pg_cursor.execute("RELEASE SAVEPOINT studyhub_migration_row")
+                except psycopg.Error as exc:
+                    pg_cursor.execute("ROLLBACK TO SAVEPOINT studyhub_migration_row")
+                    pg_cursor.execute("RELEASE SAVEPOINT studyhub_migration_row")
+                    if exc.sqlstate == "23503":
+                        counts["fk_skipped"] += 1
+                    else:
+                        counts["errors"] += 1
+                        print(
+                            "  {} row {} failed ({}).".format(
+                                table, row_number, exc.sqlstate or type(exc).__name__
+                            )
+                        )
         pg_conn.commit()
-        print(f"  {table}: {source_count} source rows, {inserted} inserted")
+    except Exception:
+        pg_conn.rollback()
+        raise
 
-    print(f"\n--- Migration Summary ---")
-    print(f"Total rows transferred: {total_inserted}")
-    print(f"Total source rows: {total_source}")
-
-    # Verify
-    if verify_migration(sqlite_conn, pg_conn):
-        print("\nAll table counts match!")
-    else:
-        print("\nSome table counts do not match - review above output")
-
-    sqlite_conn.close()
-    pg_conn.close()
-
-    print("\nMigration complete. The SQLite database was not modified.")
-    print("Review the verification results before switching your application to PostgreSQL.")
+    if "id" in destination_columns and counts["inserted"]:
+        with pg_conn.cursor() as pg_cursor:
+            pg_cursor.execute(
+                "SELECT setval(pg_get_serial_sequence(%s, 'id'), "
+                "COALESCE(MAX(id), 1), MAX(id) IS NOT NULL) FROM \"{}\"".format(table),
+                (table,),
+            )
+        pg_conn.commit()
+    return counts
 
 
-if __name__ == '__main__':
-    main()
+def reset_destination(pg_conn, tables):
+    """Delete only the selected destination tables inside one transaction."""
+    try:
+        with pg_conn.cursor() as cursor:
+            for table in reversed(tables):
+                cursor.execute('DELETE FROM "{}"'.format(table))
+        pg_conn.commit()
+    except Exception:
+        pg_conn.rollback()
+        raise
+
+
+def initialize_destination_schema(pg_conn):
+    """Run the existing additive PostgreSQL schema initializer and app extensions."""
+    from init_postgres import SCHEMA_SQL
+
+    try:
+        with pg_conn.cursor() as cursor:
+            cursor.execute(SCHEMA_SQL)
+            cursor.execute(
+                "CREATE TABLE IF NOT EXISTS user_oauth_accounts ("
+                "id SERIAL PRIMARY KEY, "
+                "provider VARCHAR(32) NOT NULL, "
+                "provider_subject_hash VARCHAR(64) NOT NULL, "
+                "user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, "
+                "linked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+                "UNIQUE(provider, provider_subject_hash), UNIQUE(user_id, provider))"
+            )
+            cursor.execute(
+                "CREATE TABLE IF NOT EXISTS user_notifications ("
+                "id SERIAL PRIMARY KEY, "
+                "user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, "
+                "title VARCHAR(255) NOT NULL, message TEXT NOT NULL, "
+                "link VARCHAR(500) DEFAULT NULL, dedupe_key VARCHAR(180) DEFAULT NULL, "
+                "is_read INTEGER NOT NULL DEFAULT 0, "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+                "UNIQUE(user_id, dedupe_key))"
+            )
+            for column, definition in (
+                ("published_at", "TIMESTAMP DEFAULT NULL"),
+                ("link", "VARCHAR(500) DEFAULT NULL"),
+                ("audience", "VARCHAR(20) DEFAULT 'active'"),
+            ):
+                cursor.execute(
+                    'ALTER TABLE announcements ADD COLUMN IF NOT EXISTS "{}" {}'.format(
+                        column, definition
+                    )
+                )
+        pg_conn.commit()
+    except Exception:
+        pg_conn.rollback()
+        raise
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--source",
+        default=Config.SQLITE_DB,
+        help="SQLite source path (default: SQLITE_DB/SQLITE_SOURCE_DB or project default)",
+    )
+    parser.add_argument(
+        "--target",
+        choices=("development", "production"),
+        required=True,
+        help="Explicit PostgreSQL target environment",
+    )
+    parser.add_argument(
+        "--check-config",
+        action="store_true",
+        help="Validate source, target connection, and destination schema without writing",
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply the migration; without this option the command is read-only",
+    )
+    parser.add_argument(
+        "--initialize-schema",
+        action="store_true",
+        help="Create missing PostgreSQL tables/indexes using the existing schema initializer",
+    )
+    parser.add_argument(
+        "--confirm-production",
+        action="store_true",
+        help="Explicitly authorize writes when --target production is selected",
+    )
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="Delete rows from selected destination tables before migration",
+    )
+    parser.add_argument(
+        "--confirm-reset",
+        action="store_true",
+        help="Also type RESET STUDYHUB TARGET to confirm destructive --reset",
+    )
+    return parser
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    if args.target == "production" and args.apply and not args.confirm_production:
+        print("ERROR: production writes require --confirm-production.", file=sys.stderr)
+        return 2
+    if args.reset and (not args.apply or not args.confirm_reset):
+        print(
+            "ERROR: --reset requires --apply and --confirm-reset.",
+            file=sys.stderr,
+        )
+        return 2
+    if args.target == "production" and args.reset:
+        print("ERROR: destructive reset is disabled for production targets.", file=sys.stderr)
+        return 2
+    if args.initialize_schema and not args.apply:
+        print(
+            "ERROR: --initialize-schema requires --apply; schema creation writes to the target.",
+            file=sys.stderr,
+        )
+        return 2
+    if args.reset:
+        confirmation = input("Type RESET STUDYHUB TARGET to delete destination rows: ")
+        if confirmation != "RESET STUDYHUB TARGET":
+            print("Reset cancelled.")
+            return 2
+
+    source_conn = None
+    target_conn = None
+    summary = {"source": {}, "destination_before": {}, "tables": {}, "errors": []}
+    try:
+        source_conn = open_sqlite_readonly(args.source)
+        tables, ignored_tables = sqlite_tables(source_conn)
+        if not tables:
+            raise RuntimeError("SQLite source contains no recognized StudyHub tables.")
+
+        target_url, target_error = resolve_target_url(args.target)
+        if target_error:
+            raise RuntimeError(target_error)
+        target_conn = open_postgres(target_url)
+
+        if args.initialize_schema:
+            initialize_destination_schema(target_conn)
+
+        summary["source"] = source_counts(source_conn, tables)
+        summary["ignored_source_tables"] = ignored_tables
+        schema_errors, destination_counts, type_maps = validate_destination_schema(
+            source_conn, target_conn, tables
+        )
+        summary["destination_before"] = destination_counts
+        if schema_errors:
+            summary["errors"].extend(schema_errors)
+            raise RuntimeError(
+                "Destination schema validation failed: {}".format(
+                    "; ".join(schema_errors)
+                )
+            )
+
+        print("Source SQLite: {}".format(Path(args.source).resolve()))
+        print("Target PostgreSQL: validated ({})".format(args.target))
+        print("Source tables: {}".format(len(tables)))
+        print("Mode: {}".format("write" if args.apply else "read-only validation"))
+
+        if args.check_config or not args.apply:
+            print("Configuration and schema validation passed; no data was written.")
+            return 0
+
+        if args.reset:
+            reset_destination(target_conn, tables)
+            destination_counts = {table: 0 for table in tables}
+
+        for table in tables:
+            result = migrate_table(
+                source_conn, target_conn, table, type_maps[table]
+            )
+            with target_conn.cursor() as cursor:
+                cursor.execute('SELECT COUNT(*) FROM "{}"'.format(table))
+                result["destination_after"] = cursor.fetchone()[0]
+            summary["tables"][table] = result
+            print(
+                "{}: source={source}, inserted={inserted}, conflicts={conflicts}, "
+                "foreign-key skipped={fk_skipped}, errors={errors}, destination={destination_after}"
+                .format(table, **result)
+            )
+
+        print("Migration summary:")
+        print(json.dumps(summary, indent=2, default=str))
+        return 1 if any(row["errors"] or row["fk_skipped"] for row in summary["tables"].values()) else 0
+    except (
+        OSError,
+        sqlite3.Error,
+        RuntimeError,
+        psycopg.Error,
+        ValueError,
+        TypeError,
+    ) as exc:
+        if target_conn:
+            target_conn.rollback()
+        if isinstance(exc, psycopg.Error):
+            detail = _safe_postgres_error(exc)
+        elif isinstance(exc, RuntimeError):
+            detail = str(exc)
+        else:
+            detail = "Migration failed ({}). No credentials or row values were logged.".format(
+                type(exc).__name__
+            )
+        print("ERROR: {}".format(detail), file=sys.stderr)
+        if summary["source"]:
+            summary["errors"].append(detail)
+            print("Partial migration summary:")
+            print(json.dumps(summary, indent=2, default=str))
+        return 1
+    finally:
+        if source_conn:
+            source_conn.close()
+        if target_conn:
+            target_conn.close()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

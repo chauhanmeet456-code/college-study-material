@@ -4,16 +4,19 @@ import time
 from datetime import datetime, timedelta
 
 _session_logger = logging.getLogger('studyhub.session')
+_app_logger = logging.getLogger('studyhub.app')
 
 from flask import (
     Flask,
     flash,
+    g,
     redirect,
     request,
     session,
     url_for,
 )
 from markupsafe import Markup
+import pymysql
 
 from config import Config
 from models.session import UserSession, hash_session_token
@@ -21,7 +24,13 @@ from routes.main import main_bp
 from routes.auth import auth_bp
 from routes.user import user_bp
 from routes.admin import admin_bp
-from utils.database import immediate_transaction, ensure_schema_extensions
+from utils.database import (
+    DatabaseConnectionError,
+    ensure_schema_extensions,
+    immediate_transaction,
+    is_database_connection_error,
+    is_database_unavailable_error,
+)
 from utils.security import (
     apply_security_headers,
     csrf_input,
@@ -56,14 +65,33 @@ SKIP_SESSION_CHECK_ENDPOINTS = {
     'user.revoke_all_sessions',
     'user.session_status',
     'main.index',
+    'main.favicon',
+    'main.privacy_policy',
+    'main.terms_of_service',
+    'main.cookie_policy',
+    'main.raw_material_file',
+    'main.serve_uploaded_file',
+    'main.save_cookie_consent',
 }
 
 ACTIVITY_TOUCH_INTERVAL_SECONDS = 60
 
 
 def create_app():
+    if Config.IS_RENDER and not Config.SECRET_KEY:
+        raise RuntimeError(
+            'SECRET_KEY must be configured in the Render environment.'
+        )
+    if Config.DATABASE_CONFIG_ERROR:
+        raise RuntimeError(
+            'Database configuration error: {}'.format(
+                Config.DATABASE_CONFIG_ERROR
+            )
+        )
     app = Flask(__name__)
     app.config.from_object(Config)
+    if not app.config.get('SECRET_KEY'):
+        app.config['SECRET_KEY'] = 'dev-secret-key'
 
     # Hardened session cookies. HttpOnly blocks script access, SameSite=Lax is
     # the baseline CSRF defence, and Secure is enabled for HTTPS deployments.
@@ -82,13 +110,12 @@ def create_app():
     app.register_blueprint(admin_bp)
     init_socketio(app)
 
-    # Add the ended_by_admin column and the notification queue table if they
-    # are not already present.  This is wrapped defensively so a locked-down
-    # or read-only database can never prevent the application from starting.
-    try:
-        ensure_schema_extensions()
-    except Exception:
-        pass
+    # Apply additive schema updates. Connectivity and missing-schema failures
+    # are logged without preventing startup; unexpected errors remain visible.
+    if not ensure_schema_extensions():
+        _app_logger.error(
+            "One or more database schema extensions could not be initialized."
+        )
 
     @app.context_processor
     def inject_template_helpers():
@@ -106,10 +133,20 @@ def create_app():
 
     @app.context_processor
     def inject_settings():
+        if getattr(g, 'database_unavailable', False):
+            return {"settings": {}}
         try:
             from models.settings import Settings
             return {"settings": Settings.get_all()}
-        except Exception:
+        except Exception as exc:
+            if not is_database_unavailable_error(exc):
+                raise
+            if is_database_connection_error(exc):
+                g.database_unavailable = True
+            _app_logger.warning(
+                "Settings unavailable for this request (%s)",
+                type(exc).__name__,
+            )
             return {"settings": {}}
 
     app.jinja_env.filters['plain_meta'] = clean_meta_description
@@ -236,6 +273,46 @@ def create_app():
         if os.path.exists(os.path.join(app.static_folder, "404.html")):
             return app.send_static_file("404.html"), 404
         return "<h1>404 - Page Not Found</h1>", 404
+
+    @app.errorhandler(403)
+    def forbidden(e):
+        if os.path.exists(os.path.join(app.static_folder, "403.html")):
+            return app.send_static_file("403.html"), 403
+        return "<h1>403 - Access Denied</h1>", 403
+
+    @app.errorhandler(DatabaseConnectionError)
+    def database_unavailable(e):
+        _app_logger.error(
+            "Required database operation unavailable: %s",
+            str(e),
+        )
+        if request.path.startswith('/api/') or request.is_json:
+            return {
+                "success": False,
+                "message": "The database is temporarily unavailable. Please try again later.",
+            }, 503
+        return (
+            "<h1>Service temporarily unavailable</h1>"
+            "<p>The database could not be reached. Please try again later.</p>",
+            503,
+        )
+
+    @app.errorhandler(pymysql.err.OperationalError)
+    def mysql_unavailable(e):
+        _app_logger.error(
+            "MySQL operation unavailable (%s)",
+            type(e).__name__,
+        )
+        if request.path.startswith('/api/') or request.is_json:
+            return {
+                "success": False,
+                "message": "The database is temporarily unavailable. Please try again later.",
+            }, 503
+        return (
+            "<h1>Service temporarily unavailable</h1>"
+            "<p>The database could not be reached. Please try again later.</p>",
+            503,
+        )
 
     @app.errorhandler(500)
     def server_error(e):

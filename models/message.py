@@ -1,4 +1,8 @@
-from utils.database import get_connection, get_cursor, close_cursor
+from utils.database import (
+    close_cursor,
+    get_connection,
+    get_cursor,
+)
 from datetime import datetime
 
 class ContactMessage:

@@ -72,13 +72,12 @@ block content %}
                   <i class="fas fa-trash"></i> Delete
                 </button>
               </form>
-              <a
-                href="{{ url_for('admin.activate_user', user_id=user.id) }}"
-                class="btn btn-sm btn-outline-success"
-                title="Keep Account Active"
-              >
-                <i class="fas fa-check"></i> Keep
-              </a>
+              <form method="POST" action="{{ url_for('admin.activate_user', user_id=user.id) }}">
+                {{ csrf_input() }}
+                <button type="submit" class="btn btn-sm btn-outline-success" title="Keep Account Active">
+                  <i class="fas fa-check"></i> Keep
+                </button>
+              </form>
             </div>
           </td>
         </tr>

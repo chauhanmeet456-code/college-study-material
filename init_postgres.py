@@ -300,17 +300,48 @@ $$;
 
 def init_postgres():
     if not Config.USE_POSTGRES:
-        print("DATABASE_URL is not set in .env - exiting")
-        return
+        if Config.IS_RENDER:
+            raise RuntimeError("Render PostgreSQL DATABASE_URL is not configured.")
+        raise RuntimeError(
+            "No PostgreSQL target is configured. Set DEV_DATABASE_URL locally "
+            "or DATABASE_URL on Render; this script does not use MySQL or SQLite."
+        )
 
-    conn = psycopg.connect(Config.DATABASE_URL, autocommit=True)
-    cursor = conn.cursor()
-
-    cursor.execute(SCHEMA_SQL)
-    cursor.close()
-    conn.close()
-    print("PostgreSQL database schema created successfully!")
+    conn = None
+    try:
+        conn = psycopg.connect(
+            Config.DATABASE_URL,
+            connect_timeout=Config.DB_CONNECT_TIMEOUT,
+            application_name="studyhub-schema-init",
+        )
+        with conn.cursor() as cursor:
+            cursor.execute(SCHEMA_SQL)
+        conn.commit()
+        print("PostgreSQL database schema created successfully!")
+    except psycopg.Error as exc:
+        if conn:
+            conn.rollback()
+        message = str(exc).lower()
+        if "getaddrinfo" in message or "name or service not known" in message:
+            reason = "The PostgreSQL hostname could not be resolved."
+        elif "timeout" in message or "timed out" in message:
+            reason = "The PostgreSQL connection timed out."
+        elif "authentication failed" in message:
+            reason = "PostgreSQL authentication failed; check the selected environment variable."
+        elif "connection refused" in message or "could not connect" in message:
+            reason = "PostgreSQL refused or could not accept the connection."
+        else:
+            reason = "PostgreSQL schema initialization failed ({}).".format(
+                type(exc).__name__
+            )
+        raise RuntimeError(reason) from None
+    finally:
+        if conn:
+            conn.close()
 
 
 if __name__ == '__main__':
-    init_postgres()
+    try:
+        init_postgres()
+    except RuntimeError as exc:
+        raise SystemExit(str(exc)) from None

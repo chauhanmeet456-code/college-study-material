@@ -2,8 +2,10 @@ import os
 import time
 import threading
 import logging
+import hashlib
 from contextlib import contextmanager
 from datetime import datetime, date
+from urllib.parse import parse_qs, urlsplit
 from config import Config
 import pymysql
 import psycopg
@@ -104,8 +106,11 @@ class PostgresCursorWrapper:
                     self._cursor.execute(query, params)
                 else:
                     self._cursor.execute(query)
-                row = self._cursor.fetchone()
-                self._lastrowid = row["id"] if row else None
+                try:
+                    row = self._cursor.fetchone()
+                    self._lastrowid = row["id"] if row and "id" in row else None
+                except Exception:
+                    self._lastrowid = None
                 return self
 
         self._lastrowid = None
@@ -165,7 +170,14 @@ class PooledConnection:
             return
         self._closed = True
         if self._pool is not None:
-            self._pool.put(self._conn)
+            try:
+                self._pool.put(self._conn)
+            except Exception as exc:
+                _transaction_logger.warning(
+                    "Could not return PostgreSQL connection to pool (%s)",
+                    type(exc).__name__,
+                )
+                PostgreSQLConnectionPool._discard(self._conn)
         else:
             try:
                 self._conn.close()
@@ -182,35 +194,120 @@ class PooledConnection:
             return True
 
 
+class DatabaseConnectionError(psycopg.OperationalError):
+    """Raised with clear actionable guidance when database connection fails."""
+
+    def __new__(cls, *args, **kwargs):
+        return super().__new__(cls)
+
+    def __init__(
+        self, message=None, *, original_error=None, host=None, port=None,
+        database=None, user=None,
+    ):
+        error_text = str(original_error or '').lower()
+        if 'getaddrinfo' in error_text or '11001' in error_text:
+            safe_message = (
+                "PostgreSQL DNS name resolution failed ([Errno 11001] getaddrinfo failed). "
+                "For local development on Windows, set DEV_DATABASE_URL (or LOCAL_DATABASE_URL) in .env "
+                "to your local PostgreSQL instance (e.g. postgresql://postgres:password@localhost:5432/college_study), "
+                "or set USE_SQLITE=true if developing offline. In production on Render, DATABASE_URL is used."
+            )
+        elif 'connection refused' in error_text or '10061' in error_text:
+            safe_message = (
+                "PostgreSQL connection refused. "
+                "Confirm the configured PostgreSQL database server is running and reachable."
+            )
+        elif 'password authentication failed' in error_text:
+            safe_message = (
+                "PostgreSQL password authentication failed. "
+                "Verify the configured database credentials."
+            )
+        else:
+            safe_message = message or 'Could not connect to the configured PostgreSQL database.'
+        super().__init__(safe_message)
+
+
+def is_database_connection_error(exc):
+    """Return whether an exception indicates a database connectivity failure."""
+    if isinstance(
+        exc,
+        (DatabaseConnectionError, psycopg.OperationalError, pymysql.err.OperationalError),
+    ):
+        return True
+
+    if isinstance(exc, sqlite3.OperationalError):
+        message = str(exc).lower()
+        return any(text in message for text in (
+            'unable to open database file',
+            'database is locked',
+            'database or disk is full',
+            'disk i/o error',
+        ))
+    return False
+
+
+def is_database_unavailable_error(exc):
+    """Recognize connection failures and missing optional-schema objects."""
+    if is_database_connection_error(exc):
+        return True
+
+    sqlstate = getattr(exc, 'sqlstate', None)
+    if sqlstate in {'42P01', '42703'}:  # PostgreSQL undefined table/column
+        return True
+
+    error_code = getattr(exc, 'args', (None,))[0]
+    if error_code == 1146:  # MySQL/MariaDB missing table
+        return True
+
+    message = str(exc).lower()
+    return 'no such table:' in message or 'no such column:' in message
+
+
 class PostgreSQLConnectionPool:
-    """A minimal thread-local connection pool for PostgreSQL / NeonDB.
+    """A thread-local connection pool for PostgreSQL / NeonDB.
 
-    Each thread keeps at most one cached connection.  When the caller invokes
-    ``conn.close()`` the connection is returned to the pool instead of being
-    destroyed, avoiding the expensive cold-start penalty on every database call.
+    Each thread keeps a pool of cached connections (up to Config.DB_POOL_MAX_PER_THREAD).
+    When the caller invokes ``conn.close()`` on a PooledConnection, it is returned
+    to the pool instead of being destroyed, avoiding expensive cold-start and
+    handshake latency on every database call.
 
-    Connections are validated with a trivial ``SELECT 1`` before reuse; a
-    stale connection is replaced with a fresh one.
+    Pooled connections are rolled back and health-checked before reuse so
+    terminated or transaction-aborted NeonDB sessions are discarded.
     """
 
-    def __init__(self, max_per_thread=1):
-        self._max_per_thread = max_per_thread
+    def __init__(self, max_per_thread=None):
+        self._max_per_thread = max_per_thread or Config.DB_POOL_MAX_PER_THREAD
+
+    @staticmethod
+    def _database_key():
+        return hashlib.sha256(
+            (Config.DATABASE_URL or '').encode('utf-8')
+        ).digest()
 
     def get(self):
         pool = getattr(_tls, "pg_pool", None)
+        database_key = self._database_key()
         while pool:
             conn = pool.pop()
-            if self._prepare_for_reuse(conn):
+            if (
+                getattr(conn, "_studyhub_database_key", database_key) == database_key
+                and self._prepare_for_reuse(conn)
+            ):
                 return conn
             self._discard(conn)
 
         return self._create_connection()
 
     def put(self, conn):
-        if not self._reset_transaction(conn):
+        if (
+            getattr(conn, "_studyhub_database_key", self._database_key())
+            != self._database_key()
+            or not self._reset_transaction(conn)
+        ):
             self._discard(conn)
             return
 
+        conn._studyhub_last_used = time.time()
         pool = getattr(_tls, "pg_pool", None)
         if pool is None:
             pool = []
@@ -225,6 +322,7 @@ class PostgreSQLConnectionPool:
         try:
             return (
                 not conn.closed
+                and hasattr(conn, "pgconn")
                 and conn.pgconn.status == psycopg.pq.ConnStatus.OK
             )
         except Exception:
@@ -234,8 +332,8 @@ class PostgreSQLConnectionPool:
     def _transaction_is_idle(cls, conn):
         try:
             return (
-                conn.pgconn.transaction_status
-                == psycopg.pq.TransactionStatus.IDLE
+                hasattr(conn, "pgconn")
+                and conn.pgconn.transaction_status == psycopg.pq.TransactionStatus.IDLE
             )
         except Exception:
             return False
@@ -265,10 +363,12 @@ class PostgreSQLConnectionPool:
             return_value = cursor.fetchone()
             if return_value is None:
                 return False
-            if cursor is not None:
-                cursor.close()
-                cursor = None
-            return cls._reset_transaction(conn)
+            cursor.close()
+            cursor = None
+            if cls._reset_transaction(conn):
+                conn._studyhub_last_used = time.time()
+                return True
+            return False
         except Exception as exc:
             _transaction_logger.info(
                 "Discarding unusable PostgreSQL connection (%s)",
@@ -291,15 +391,70 @@ class PostgreSQLConnectionPool:
 
     @staticmethod
     def _create_connection():
-        conn = psycopg.connect(
-            Config.DATABASE_URL,
-            row_factory=psycopg.rows.dict_row,
-            sslmode="require" if "sslmode" not in Config.DATABASE_URL else "prefer",
-            connect_timeout=30,
-            application_name="studyhub",
+        db_url = Config.DATABASE_URL
+        if Config.DATABASE_CONFIG_ERROR:
+            raise DatabaseConnectionError(Config.DATABASE_CONFIG_ERROR)
+        if not db_url:
+            raise DatabaseConnectionError(
+                'PostgreSQL configuration error: no PostgreSQL URL was selected. '
+                'Set DEV_DATABASE_URL locally or DATABASE_URL on Render.'
+            )
+
+        # Parse host only to choose the default SSL mode; never log the URL.
+        try:
+            parsed = urlsplit(db_url)
+            host = parsed.hostname
+            port = parsed.port or 5432
+        except ValueError:
+            raise DatabaseConnectionError(
+                'Configured PostgreSQL URL is malformed.'
+            ) from None
+
+        connect_kwargs = {
+            "row_factory": psycopg.rows.dict_row,
+            "connect_timeout": Config.DB_CONNECT_TIMEOUT,
+            "application_name": "studyhub",
+        }
+
+        # Respect an explicitly configured sslmode. Local PostgreSQL defaults
+        # to prefer SSL; managed/remote PostgreSQL requires encrypted transport.
+        if not parse_qs(parsed.query).get("sslmode"):
+            connect_kwargs["sslmode"] = (
+                "prefer"
+                if (host or "").lower() in ("localhost", "127.0.0.1", "::1")
+                else "require"
+            )
+
+        max_attempts = 3
+        last_exc = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                conn = psycopg.connect(db_url, **connect_kwargs)
+                conn.autocommit = False
+                conn._studyhub_last_used = time.time()
+                conn._studyhub_database_key = PostgreSQLConnectionPool._database_key()
+                return conn
+            except psycopg.OperationalError as exc:
+                last_exc = exc
+                err_str = str(exc).lower()
+                # DNS failures and expired connect timeouts won't improve with an
+                # immediate retry; fail fast so optional homepage queries can fall back.
+                if any(text in err_str for text in (
+                    "getaddrinfo", "11001", "timeout", "timed out",
+                )):
+                    break
+                if attempt < max_attempts:
+                    time.sleep(0.5 * attempt)
+
+        _transaction_logger.error(
+            "PostgreSQL connection failed (%s)",
+            type(last_exc).__name__ if last_exc else "unknown error",
         )
-        conn.autocommit = False
-        return conn
+        raise DatabaseConnectionError(
+            original_error=last_exc,
+            host=host,
+            port=port,
+        ) from None
 
 
 _pg_pool = PostgreSQLConnectionPool()
@@ -308,20 +463,18 @@ _pg_pool = PostgreSQLConnectionPool()
 def get_connection():
     """Return a database connection based on configuration.
 
-    Priority: SQLite (USE_SQLITE=true) > PostgreSQL (DATABASE_URL) > MySQL (default)
+    Local priority: explicit DATABASE_BACKEND selection, then a configured
+    development PostgreSQL URL, explicit SQLite mode, and configured MySQL.
 
-    When ``USE_SQLITE`` is explicitly set to true in the environment, it takes
-    priority over ``DATABASE_URL`` so that a locally present SQLite database
-    is never shadowed by a stale or empty PostgreSQL endpoint.
+    A local ``DATABASE_URL`` is never selected. ``DEV_DATABASE_URL`` takes
+    precedence over the ``USE_SQLITE`` convenience flag unless the caller
+    explicitly selects another backend with ``DATABASE_BACKEND``.
 
     For PostgreSQL, a thread-local connection pool is used to avoid the
     expensive cold-start latency of NeonDB's serverless compute on every
     database call.  The pooled connection is returned to the pool when
     ``conn.close()`` is called.
     """
-    if Config.USE_POSTGRES:
-        conn = _pg_pool.get()
-        return PooledConnection(conn, _pg_pool)
     if Config.USE_SQLITE:
         os.makedirs(os.path.dirname(Config.SQLITE_DB), exist_ok=True)
         conn = sqlite3.connect(Config.SQLITE_DB, timeout=30)
@@ -329,14 +482,49 @@ def get_connection():
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA busy_timeout = 30000")
         return conn
-    conn = pymysql.connect(
-        host=Config.MYSQL_HOST,
-        port=Config.MYSQL_PORT,
-        user=Config.MYSQL_USER,
-        password=Config.MYSQL_PASSWORD,
-        database=Config.MYSQL_DB,
-        cursorclass=pymysql.cursors.DictCursor,
-    )
+    if Config.DATABASE_CONFIG_ERROR:
+        raise DatabaseConnectionError(Config.DATABASE_CONFIG_ERROR)
+    if Config.USE_POSTGRES:
+        conn = _pg_pool.get()
+        return PooledConnection(conn, _pg_pool)
+    if not any(os.getenv(key) for key in ('DB_HOST', 'DB_NAME', 'DB_USER')):
+        raise DatabaseConnectionError(
+            'No database is configured. Set DEV_DATABASE_URL locally or '
+            'DATABASE_URL on Render.'
+        )
+    try:
+        conn = pymysql.connect(
+            host=Config.MYSQL_HOST,
+            port=Config.MYSQL_PORT,
+            user=Config.MYSQL_USER,
+            password=Config.MYSQL_PASSWORD,
+            database=Config.MYSQL_DB,
+            cursorclass=pymysql.cursors.DictCursor,
+            connect_timeout=Config.DB_CONNECT_TIMEOUT,
+        )
+    except pymysql.err.OperationalError as exc:
+        error_code = exc.args[0] if exc.args else None
+        if error_code == 1045:
+            message = (
+                'MySQL authentication failed for the configured local database '
+                'account. Verify DB_USER and DB_PASSWORD in .env; no credentials '
+                'were logged.'
+            )
+        elif error_code in (2002, 2003, 2006, 2013):
+            message = (
+                'The configured MySQL server is unavailable or refused the '
+                'connection. Verify DB_HOST, DB_PORT, and that MySQL is running.'
+            )
+        else:
+            message = (
+                'MySQL connection failed (error code {}). Verify the local '
+                'database settings in .env.'.format(error_code or 'unknown')
+            )
+        _transaction_logger.error(
+            'MySQL connection failed (error code %s)',
+            error_code or 'unknown',
+        )
+        raise DatabaseConnectionError(message) from None
     return conn
 
 
@@ -487,16 +675,19 @@ def _has_column(conn, table, column):
             return False
         return column in cols
     # PostgreSQL / MySQL: query the information schema.
-    cur = conn.execute(
-        (
+    if dialect == "postgres":
+        query = (
             "SELECT 1 FROM information_schema.columns "
-            "WHERE table_name = %s AND column_name = %s LIMIT 1"
-            if dialect == "postgres"
-            else "SELECT 1 FROM information_schema.columns "
-            "WHERE table_name = %s AND column_name = %s LIMIT 1"
-        ),
-        (table, column),
-    )
+            "WHERE table_schema = current_schema() "
+            "AND table_name = %s AND column_name = %s LIMIT 1"
+        )
+    else:
+        query = (
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema = DATABASE() "
+            "AND table_name = %s AND column_name = %s LIMIT 1"
+        )
+    cur = conn.execute(query, (table, column))
     return cur.fetchone() is not None
 
 
@@ -508,10 +699,17 @@ def _has_table(conn, table):
             (table,),
         )
         return cur.fetchone() is not None
-    cur = conn.execute(
-        "SELECT 1 FROM information_schema.tables " "WHERE table_name = %s LIMIT 1",
-        (table,),
-    )
+    if dialect == "postgres":
+        query = (
+            "SELECT 1 FROM information_schema.tables "
+            "WHERE table_schema = current_schema() AND table_name = %s LIMIT 1"
+        )
+    else:
+        query = (
+            "SELECT 1 FROM information_schema.tables "
+            "WHERE table_schema = DATABASE() AND table_name = %s LIMIT 1"
+        )
+    cur = conn.execute(query, (table,))
     return cur.fetchone() is not None
 
 
@@ -535,12 +733,11 @@ def _dialect(conn):
 def ensure_schema_extensions():
     """Apply additive session, notification, and announcement schema updates.
 
-    Additive only; never raises — a failed extension is logged and skipped so a
-    locked-down or read-only connection can never break application startup.
+    Database connectivity or missing-schema failures are logged and skipped;
+    unexpected programming and DDL errors propagate to the caller.
     """
     from utils import notifications as _notif  # local import to avoid cycles
 
-    logger = _notif.log if hasattr(_notif, "log") else None
     errors = []
 
     try:
@@ -556,7 +753,7 @@ def ensure_schema_extensions():
                         changed = True
                     except Exception as exc:  # duplicate column name
                         if "duplicate column" not in str(exc).lower():
-                            errors.append(str(exc))
+                            errors.append(type(exc).__name__)
                 else:
                     # PostgreSQL supports ADD COLUMN IF NOT EXISTS is not available;
                     # the _has_column guard above makes this safe.
@@ -663,13 +860,37 @@ def ensure_schema_extensions():
                     )
                 changed = True
 
+            # Add performance indexes if tables exist
+            if _has_table(conn, "materials"):
+                for idx_stmt in (
+                    "CREATE INDEX IF NOT EXISTS idx_materials_active ON materials(is_active)",
+                    "CREATE INDEX IF NOT EXISTS idx_materials_featured ON materials(is_featured)",
+                    "CREATE INDEX IF NOT EXISTS idx_materials_category ON materials(category_id)",
+                    "CREATE INDEX IF NOT EXISTS idx_materials_subject ON materials(subject_id)",
+                ):
+                    try:
+                        conn.execute(idx_stmt)
+                        changed = True
+                    except Exception:
+                        pass
+            if _has_table(conn, "announcements"):
+                try:
+                    conn.execute("CREATE INDEX IF NOT EXISTS idx_announcements_active ON announcements(is_active)")
+                    changed = True
+                except Exception:
+                    pass
+
             if changed:
                 conn.commit()
         finally:
             conn.close()
-    except Exception as exc:  # never block startup on schema extension
-        errors.append(str(exc))
-        if logger:
-            logger.warning("Schema extensions skipped due to error (non-fatal)")
+    except Exception as exc:  # database outages must not prevent service startup
+        if not is_database_unavailable_error(exc):
+            raise
+        errors.append(type(exc).__name__)
+        _transaction_logger.error(
+            "Database schema extension initialization failed (%s)",
+            type(exc).__name__,
+        )
 
     return not errors

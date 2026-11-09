@@ -2,9 +2,19 @@ import os
 from config import Config
 
 def init_sqlite():
+    if Config.IS_RENDER:
+        raise RuntimeError("SQLite initialization is disabled in Render production.")
     if not Config.USE_SQLITE:
-        print("USE_SQLITE is not enabled in .env")
-        return
+        if Config.USE_POSTGRES:
+            backend = "PostgreSQL"
+        elif any(os.getenv(key) for key in ("DB_HOST", "DB_NAME", "DB_USER")):
+            backend = "MySQL"
+        else:
+            backend = "no local database"
+        raise RuntimeError(
+            "SQLite initialization requires USE_SQLITE=true and cannot run "
+            "while {} is configured.".format(backend)
+        )
     
     os.makedirs(os.path.dirname(Config.SQLITE_DB), exist_ok=True)
     import sqlite3
@@ -329,4 +339,7 @@ def init_sqlite():
 
 
 if __name__ == '__main__':
-    init_sqlite()
+    try:
+        init_sqlite()
+    except RuntimeError as exc:
+        raise SystemExit(str(exc)) from None

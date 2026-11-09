@@ -1,22 +1,147 @@
-from flask import Blueprint, render_template, request, flash, send_from_directory, redirect, url_for, jsonify, abort
+import logging
+import mimetypes
+import os
+import re
+import urllib.parse
+from flask import (
+    Blueprint,
+    abort,
+    current_app,
+    flash,
+    g,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_from_directory,
+    url_for,
+)
 from models.subject import Subject
 from models.material import Material
 from models.message import Announcement
 from utils.auth import get_current_user
 from utils.guest_activity import GuestActivity
-from utils.database import get_connection, get_cursor, close_cursor
+from utils.database import (
+    close_cursor,
+    get_connection,
+    get_cursor,
+    is_database_connection_error,
+    is_database_unavailable_error,
+)
 from utils.security import csrf_protect
 from config import Config
-import os
-import re
-from flask import current_app
 from utils.cookie_consent import (
     COOKIE_NAME,
     MAX_AGE as COOKIE_CONSENT_MAX_AGE,
     serialize_cookie_preferences,
 )
 
+logger = logging.getLogger('studyhub.main')
 main_bp = Blueprint('main', __name__)
+
+
+def _find_file_case_insensitive(base_dir, path_parts):
+    """Traverse path_parts case-insensitively from base_dir to match file on disk."""
+    if not os.path.isdir(base_dir):
+        return None
+    current = base_dir
+    for part in path_parts:
+        if not part:
+            continue
+        part_clean = urllib.parse.unquote(part).strip()
+        part_lower = part_clean.lower()
+        try:
+            entries = os.listdir(current)
+        except (OSError, FileNotFoundError):
+            return None
+        found = None
+        for entry in entries:
+            if entry == part or entry == part_clean or entry.lower() == part_lower:
+                found = entry
+                break
+        if found is None:
+            return None
+        current = os.path.join(current, found)
+    return current if os.path.exists(current) else None
+
+
+def _is_path_within(base_dir, path):
+    try:
+        return os.path.commonpath(
+            (os.path.realpath(base_dir), os.path.realpath(path))
+        ) == os.path.realpath(base_dir)
+    except (OSError, ValueError):
+        return False
+
+
+def resolve_material_disk_path(material):
+    """Resolve stored upload references under approved roots only."""
+    if not material:
+        return None, None
+    raw_path = str(material.get('file_path') or '').strip()
+    file_name = str(material.get('file_name') or '').replace('\\', '/').strip()
+    if not file_name:
+        return None, None
+    file_parts = [
+        urllib.parse.unquote(part).strip()
+        for part in file_name.split('/')
+        if part.strip()
+    ]
+    if len(file_parts) != 1:
+        return None, None
+    file_name = file_parts[0]
+    if file_name in ('.', '..') or '/' in file_name or '\\' in file_name:
+        return None, None
+
+    candidate_roots = []
+    if Config.UPLOAD_FOLDER:
+        candidate_roots.append(os.path.abspath(Config.UPLOAD_FOLDER))
+    static_root = current_app.static_folder if current_app else os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static')
+    if static_root:
+        candidate_roots.append(os.path.abspath(os.path.join(static_root, 'uploads')))
+    proj_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    candidate_roots.append(os.path.abspath(os.path.join(proj_dir, 'static', 'uploads')))
+
+    seen = set()
+    roots = []
+    for r in candidate_roots:
+        if r and r not in seen:
+            seen.add(r)
+            roots.append(r)
+
+    raw_parts = [
+        urllib.parse.unquote(part).strip()
+        for part in raw_path.replace('\\', '/').split('/')
+        if part.strip()
+    ]
+    if any(part in ('.', '..') or '/' in part or '\\' in part for part in raw_parts):
+        return None, None
+    while raw_parts and raw_parts[0].lower() in ('static', 'uploads'):
+        raw_parts.pop(0)
+
+    for root in roots:
+        if not os.path.isdir(root):
+            continue
+
+        root_parts = raw_parts
+        if os.path.isabs(raw_path) and _is_path_within(root, raw_path):
+            root_parts = os.path.relpath(raw_path, root).replace('\\', '/').split('/')
+            if root_parts == ['.']:
+                root_parts = []
+
+        direct = os.path.realpath(os.path.join(root, *root_parts, file_name))
+        if _is_path_within(root, direct) and os.path.isfile(direct):
+            rel_name = os.path.relpath(direct, root).replace('\\', '/')
+            return direct, rel_name
+
+        matched = _find_file_case_insensitive(root, root_parts + [file_name])
+        if matched and _is_path_within(root, matched) and os.path.isfile(matched):
+            rel_name = os.path.relpath(matched, root).replace('\\', '/')
+            return matched, rel_name
+
+    fallback_rel = '/'.join(raw_parts + [file_name])
+    return None, fallback_rel
+
 
 @main_bp.route('/api/favorites/<int:material_id>', methods=['POST'])
 @csrf_protect
@@ -81,31 +206,66 @@ def api_search():
 
 @main_bp.route('/')
 def index():
-    announcements = Announcement.get_all_active(limit=5)
-    subjects = Subject.get_all(active_only=True)
-    latest_materials = Material.get_latest(limit=6)
-    featured_materials = Material.get_featured(limit=6)
+    database_connection_unavailable = False
+
+    def optional_home_query(name, callback, fallback):
+        nonlocal database_connection_unavailable
+        if database_connection_unavailable:
+            return fallback
+        try:
+            return callback()
+        except Exception as exc:
+            if not is_database_unavailable_error(exc):
+                raise
+            database_connection_unavailable = is_database_connection_error(exc)
+            if database_connection_unavailable:
+                g.database_unavailable = True
+            logger.warning(
+                "Homepage %s query unavailable (%s); using fallback data",
+                name,
+                type(exc).__name__,
+            )
+            return fallback
+
+    announcements = optional_home_query(
+        'announcements', lambda: Announcement.get_all_active(limit=5), []
+    )
+    subjects = optional_home_query(
+        'subjects', lambda: Subject.get_all(active_only=True), []
+    )
+    latest_materials = optional_home_query(
+        'latest materials', lambda: Material.get_latest(limit=6), []
+    )
+    featured_materials = optional_home_query(
+        'featured materials', lambda: Material.get_featured(limit=6), []
+    )
     total_materials = 0
     total_notes = 0
     total_students = 0
     total_subjects = len(subjects)
-    try:
-        conn = get_connection()
-        cursor = get_cursor(conn)
-        cursor.execute("""
-            SELECT
-                (SELECT COUNT(*) FROM materials WHERE is_active = 1) as total_materials,
-                (SELECT COUNT(*) FROM materials m JOIN categories c ON m.category_id = c.id WHERE c.name = 'Notes' AND m.is_active = 1) as total_notes,
-                (SELECT COUNT(*) FROM users WHERE is_active = 1) as total_students
-        """)
-        counts = cursor.fetchone()
-        total_materials = counts['total_materials']
-        total_notes = counts['total_notes']
-        total_students = counts['total_students']
-        close_cursor(cursor)
-        conn.close()
-    except Exception:
-        pass
+
+    def get_homepage_counts():
+        conn = None
+        cursor = None
+        try:
+            conn = get_connection()
+            cursor = get_cursor(conn)
+            cursor.execute("""
+                SELECT
+                    (SELECT COUNT(*) FROM materials WHERE is_active = 1) as total_materials,
+                    (SELECT COUNT(*) FROM materials m JOIN categories c ON m.category_id = c.id WHERE c.name = 'Notes' AND m.is_active = 1) as total_notes,
+                    (SELECT COUNT(*) FROM users WHERE is_active = 1) as total_students
+            """)
+            return cursor.fetchone() or {}
+        finally:
+            close_cursor(cursor)
+            if conn:
+                conn.close()
+
+    counts = optional_home_query('counts', get_homepage_counts, {})
+    total_materials = counts.get('total_materials') or 0
+    total_notes = counts.get('total_notes') or 0
+    total_students = counts.get('total_students') or 0
     return render_template('index.html', subjects=subjects, latest_materials=latest_materials,
                            featured_materials=featured_materials, announcements=announcements,
                            total_subjects=total_subjects, total_materials=total_materials,
@@ -113,8 +273,9 @@ def index():
                            current_user=get_current_user(),
                            meta_title='StudyHub - College Study Materials, Notes & Resources',
                            meta_description=(
-                               'Access notes, assignments, books, practicals, '
-                               'question papers and more for your course.'
+                               'Access college study materials, notes, assignments, '
+                               'books, practicals and question papers in one place '
+                               'with StudyHub.'
                            ))
 
 @main_bp.route('/subjects')
@@ -197,8 +358,11 @@ def material_details(material_id):
     material['is_favorited'] = is_favorited
     from utils.helpers import is_video_file
     is_video = is_video_file(material.get('file_name', ''))
+    disk_path, _ = resolve_material_disk_path(material)
+    file_exists = bool(disk_path and os.path.isfile(disk_path))
     return render_template('material_details.html', material=material, subject=subject, current_user=current_user,
-                           remaining_views=remaining_views, remaining_downloads=remaining_downloads, is_video=is_video,
+                           remaining_views=remaining_views, remaining_downloads=remaining_downloads,
+                           is_video=is_video, file_exists=file_exists,
                            meta_title='{} - StudyHub'.format(material['title']),
                            meta_description=(
                                material.get('description')
@@ -222,15 +386,41 @@ def view_material(material_id):
         remaining_views = max(0, Config.GUEST_VIEW_LIMIT - GuestActivity.get_view_count())
     from utils.helpers import is_video_file
     is_video = is_video_file(material.get('file_name', ''))
-    raw_path = material.get('file_path', '') or ''
-    if raw_path.startswith('static\\'):
-        rel_path = raw_path[7:].replace('\\', '/')
-    elif raw_path.startswith('static/'):
-        rel_path = raw_path[7:]
-    else:
-        rel_path = raw_path.replace('\\', '/')
-    return render_template('pdf_viewer.html', material=material, subject=subject, current_user=get_current_user(),
-                           remaining_views=remaining_views, is_video=is_video, rel_path=rel_path)
+
+    disk_path, rel_path = resolve_material_disk_path(material)
+    file_exists = bool(disk_path and os.path.isfile(disk_path))
+    file_url = url_for('main.raw_material_file', material_id=material_id)
+
+    return render_template(
+        'pdf_viewer.html',
+        material=material,
+        subject=subject,
+        current_user=get_current_user(),
+        remaining_views=remaining_views,
+        is_video=is_video,
+        rel_path=rel_path,
+        file_url=file_url,
+        file_exists=file_exists,
+        file_mime_type=mimetypes.guess_type(material.get('file_name') or '')[0]
+        or 'application/octet-stream',
+        meta_title=f"{material.get('title', 'Study Material')} - Viewer - StudyHub",
+        meta_description=material.get('description') or f"Preview {material.get('title', 'study material')} on StudyHub.",
+    )
+
+@main_bp.route('/material/<int:material_id>/stream')
+@main_bp.route('/material/<int:material_id>/file')
+def raw_material_file(material_id):
+    material = Material.get_by_id(material_id)
+    if not material or not material.get('is_active', 1):
+        abort(404)
+
+    disk_path, _ = resolve_material_disk_path(material)
+    if not disk_path or not os.path.isfile(disk_path):
+        abort(404)
+
+    directory = os.path.dirname(disk_path)
+    filename = os.path.basename(disk_path)
+    return send_from_directory(directory, filename, as_attachment=False, conditional=True)
 
 @main_bp.route('/material/<int:material_id>/download')
 def download_material(material_id):
@@ -240,17 +430,68 @@ def download_material(material_id):
     if not GuestActivity.can_download_material():
         flash('You have reached the free download limit. Please register or login to continue downloading materials.', 'warning')
         return redirect(url_for('auth.login'))
+
+    disk_path, _ = resolve_material_disk_path(material)
+    if not disk_path or not os.path.isfile(disk_path):
+        flash('The requested file is currently unavailable on the server. Please contact support.', 'warning')
+        return redirect(url_for('main.material_details', material_id=material_id))
+
     Material.increment_download(material_id)
     GuestActivity.record_download(material_id)
-    
-    directory = os.path.join(material['file_path'])
-    filename = material['file_name']
-    
-    directory = os.path.abspath(directory)
-    if not directory.startswith(os.path.abspath(Config.UPLOAD_FOLDER)):
-        abort(403)
-    
-    return send_from_directory(directory, filename, as_attachment=True)
+
+    directory = os.path.dirname(disk_path)
+    filename = os.path.basename(disk_path)
+    download_name = material.get('file_name') or filename
+    return send_from_directory(directory, filename, as_attachment=True, download_name=download_name, conditional=True)
+
+@main_bp.route('/static/uploads/<path:filepath>')
+@main_bp.route('/uploads/<path:filepath>')
+def serve_uploaded_file(filepath):
+    """Fallback handler for uploaded files to support custom UPLOAD_FOLDER and case-insensitive matching."""
+    decoded_path = urllib.parse.unquote(filepath).strip('/\\')
+    parts = [p for p in decoded_path.replace('\\', '/').split('/') if p]
+    if any(part in ('.', '..') for part in parts):
+        abort(404)
+    while parts and parts[0].lower() in ('static', 'uploads'):
+        parts.pop(0)
+    if not parts:
+        abort(404)
+
+    candidate_roots = []
+    if Config.UPLOAD_FOLDER:
+        candidate_roots.append(os.path.abspath(Config.UPLOAD_FOLDER))
+    static_root = current_app.static_folder if current_app else os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static')
+    if static_root:
+        candidate_roots.append(os.path.abspath(os.path.join(static_root, 'uploads')))
+
+    seen = set()
+    for root in candidate_roots:
+        if not root or root in seen or not os.path.isdir(root):
+            continue
+        seen.add(root)
+        direct = os.path.realpath(os.path.join(root, *parts))
+        if _is_path_within(root, direct) and os.path.isfile(direct):
+            return send_from_directory(os.path.dirname(direct), os.path.basename(direct), conditional=True)
+        matched = _find_file_case_insensitive(root, parts)
+        if matched and _is_path_within(root, matched) and os.path.isfile(matched):
+            return send_from_directory(os.path.dirname(matched), os.path.basename(matched), conditional=True)
+
+    abort(404)
+
+@main_bp.route('/favicon.ico')
+def favicon():
+    """Serve favicon.ico or favicon.svg from static or static/favicons directory to prevent 404 errors."""
+    static_dir = current_app.static_folder or os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static')
+    candidates = [
+        (static_dir, 'favicon.ico', 'image/vnd.microsoft.icon'),
+        (os.path.join(static_dir, 'favicons'), 'favicon.ico', 'image/vnd.microsoft.icon'),
+        (os.path.join(static_dir, 'favicons'), 'favicon.svg', 'image/svg+xml'),
+        (static_dir, 'favicon.svg', 'image/svg+xml'),
+    ]
+    for directory, filename, mimetype in candidates:
+        if os.path.isfile(os.path.join(directory, filename)):
+            return send_from_directory(directory, filename, mimetype=mimetype)
+    abort(404)
 
 @main_bp.route('/notes')
 def notes_page():

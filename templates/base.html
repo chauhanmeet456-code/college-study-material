@@ -11,8 +11,10 @@
     <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com">
     <link rel="dns-prefetch" href="https://fonts.googleapis.com">
     <title>{% block title %}College Study Material{% endblock %}</title>
-    {% set social_title = meta_title|default(self.title()|striptags|trim, true) %}
-    {% set social_description = (meta_description|default(seo.default_meta_description, true))|plain_meta %}
+    {% set seo_context = seo|default({}, true) %}
+    {% if seo_context is not mapping %}{% set seo_context = {} %}{% endif %}
+    {% set social_title = meta_title|default(self.title()|striptags|trim, true)|plain_meta %}
+    {% set social_description = meta_description|default(seo_context.get('default_meta_description', 'Explore college study materials and course resources on StudyHub.'), true)|plain_meta %}
     {% include "partials/social_metadata.html" %}
     {% block favicon %}
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicons/favicon.svg') }}">

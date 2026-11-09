@@ -109,20 +109,19 @@ endblock %} {% block page_title %}Deleted Users{% endblock %} {% block content
               >
                 <i class="fas fa-eye"></i>
               </a>
-              <a
-                href="{{ url_for('admin.activate_user', user_id=user.id) }}"
-                class="btn btn-sm btn-outline-success"
-                title="Restore Account"
-              >
-                <i class="fas fa-undo"></i>
-              </a>
+              <form method="POST" action="{{ url_for('admin.activate_user', user_id=user.id) }}">
+                {{ csrf_input() }}
+                <button type="submit" class="btn btn-sm btn-outline-success" title="Restore Account">
+                  <i class="fas fa-undo"></i>
+                </button>
+              </form>
               <form
                 method="POST"
                 action="{{ url_for('admin.delete_user', user_id=user.id) }}"
                 onsubmit="return confirm('Permanently delete this user? This cannot be undone.');"
               >
                 {{ csrf_input() }}
-                <input type="hidden" name="next" value="{{ request.url }}">
+                <input type="hidden" name="next" value="{{ request.full_path|trim('?') }}">
                 <button
                   type="submit"
                   class="btn btn-sm btn-outline-danger"

@@ -22,7 +22,17 @@ class Settings:
         cursor = None
         try:
             cursor = get_cursor(conn)
-            cursor.execute("REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)", (key, value, datetime.now()))
+            from config import Config
+            if Config.USE_POSTGRES:
+                cursor.execute(
+                    "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) "
+                    "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
+                    (key, value, datetime.now())
+                )
+            elif Config.USE_SQLITE:
+                cursor.execute("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)", (key, value, datetime.now()))
+            else:
+                cursor.execute("REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)", (key, value, datetime.now()))
             conn.commit()
         finally:
             close_cursor(cursor)

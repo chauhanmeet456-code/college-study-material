@@ -1,32 +1,40 @@
-{% if not seo.is_public_page %}
+{% set seo_context = seo|default({}, true) %}
+{% if seo_context is not mapping %}{% set seo_context = {} %}{% endif %}
+{% set page_is_public = seo_context.get('is_public_page', false) %}
+{% set site_name = app_name|default('StudyHub', true) %}
+{% set social_title = social_title|default(site_name, true)|plain_meta %}
+{% set social_description = social_description|default(seo_context.get('default_meta_description', 'Explore college study materials and course resources on StudyHub.'), true)|plain_meta %}
+{% if not page_is_public %}
 <meta name="robots" content="noindex, nofollow">
-{% set social_title = app_name %}
+{% set social_title = site_name %}
 {% set social_description = "Study materials and course resources from StudyHub." %}
-{% set social_type = "website" %}
+{% else %}
+<meta name="robots" content="{{ meta_robots|default('index, follow', true)|plain_meta }}">
 {% endif %}
 <meta name="description" content="{{ social_description }}">
-{% if seo.is_public_page and meta_robots is defined %}
-<meta name="robots" content="{{ meta_robots }}">
+{% if page_is_public and seo_context.get('canonical_url') %}
+<link rel="canonical" href="{{ seo_context.get('canonical_url') }}">
 {% endif %}
-{% if seo.canonical_url %}<link rel="canonical" href="{{ seo.canonical_url }}">{% endif %}
 <meta property="og:title" content="{{ social_title }}">
 <meta property="og:description" content="{{ social_description }}">
-{% if seo.og_image_url %}
-<meta property="og:image" content="{{ seo.og_image_url }}">
-{% if seo.og_image_secure_url %}<meta property="og:image:secure_url" content="{{ seo.og_image_secure_url }}">{% endif %}
-<meta property="og:image:type" content="{{ seo.og_image_type }}">
+{% if page_is_public and seo_context.get('og_image_url') %}
+<meta property="og:image" content="{{ seo_context.get('og_image_url') }}">
+{% if seo_context.get('og_image_secure_url') %}<meta property="og:image:secure_url" content="{{ seo_context.get('og_image_secure_url') }}">{% endif %}
+<meta property="og:image:type" content="{{ seo_context.get('og_image_type', 'image/png') }}">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="{{ seo.og_image_alt }}">
+<meta property="og:image:alt" content="{{ seo_context.get('og_image_alt', 'StudyHub college study materials') }}">
 {% endif %}
-{% if seo.canonical_url %}<meta property="og:url" content="{{ seo.canonical_url }}">{% endif %}
-<meta property="og:type" content="{{ meta_type|default('website') }}">
-<meta property="og:site_name" content="{{ app_name }}">
+{% if page_is_public and seo_context.get('canonical_url') %}
+<meta property="og:url" content="{{ seo_context.get('canonical_url') }}">
+{% endif %}
+<meta property="og:type" content="{{ meta_type|default('website', true)|plain_meta }}">
+<meta property="og:site_name" content="{{ site_name }}">
 <meta property="og:locale" content="en_IN">
-<meta name="twitter:card" content="{% if seo.og_image_url %}summary_large_image{% else %}summary{% endif %}">
+<meta name="twitter:card" content="{% if page_is_public and seo_context.get('og_image_url') %}summary_large_image{% else %}summary{% endif %}">
 <meta name="twitter:title" content="{{ social_title }}">
 <meta name="twitter:description" content="{{ social_description }}">
-{% if seo.og_image_url %}
-<meta name="twitter:image" content="{{ seo.og_image_url }}">
-<meta name="twitter:image:alt" content="{{ seo.og_image_alt }}">
+{% if page_is_public and seo_context.get('og_image_url') %}
+<meta name="twitter:image" content="{{ seo_context.get('og_image_url') }}">
+<meta name="twitter:image:alt" content="{{ seo_context.get('og_image_alt', 'StudyHub college study materials') }}">
 {% endif %}

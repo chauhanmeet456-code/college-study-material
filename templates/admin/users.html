@@ -143,27 +143,28 @@ block page_title %}Users{% endblock %} {% block content %}
               >
                 <i class="fas fa-eye"></i>
               </a>
-              <a
-                href="{{ url_for('admin.activate_user', user_id=user.id) }}"
-                class="btn btn-sm btn-outline-success"
-                title="Activate"
-              >
-                <i class="fas fa-check"></i>
-              </a>
-              <a
-                href="{{ url_for('admin.deactivate_user', user_id=user.id) }}"
-                class="btn btn-sm btn-outline-warning"
-                title="Deactivate"
-              >
-                <i class="fas fa-ban"></i>
-              </a>
+              {% if user.is_active %}
+              <form method="POST" action="{{ url_for('admin.deactivate_user', user_id=user.id) }}">
+                {{ csrf_input() }}
+                <button type="submit" class="btn btn-sm btn-outline-warning" title="Deactivate">
+                  <i class="fas fa-ban"></i>
+                </button>
+              </form>
+              {% else %}
+              <form method="POST" action="{{ url_for('admin.activate_user', user_id=user.id) }}">
+                {{ csrf_input() }}
+                <button type="submit" class="btn btn-sm btn-outline-success" title="Activate">
+                  <i class="fas fa-check"></i>
+                </button>
+              </form>
+              {% endif %}
               <form
                 method="POST"
                 action="{{ url_for('admin.delete_user', user_id=user.id) }}"
                 onsubmit="return confirm('Are you sure?');"
               >
                 {{ csrf_input() }}
-                <input type="hidden" name="next" value="{{ request.url }}">
+                <input type="hidden" name="next" value="{{ request.full_path|trim('?') }}">
                 <button
                   type="submit"
                   class="btn btn-sm btn-outline-danger"

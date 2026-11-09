@@ -25,14 +25,12 @@ PUBLIC_ENDPOINTS = {
     'main.privacy_policy',
     'main.terms_of_service',
     'main.contact',
-    'auth.login',
-    'auth.register',
 }
 
 PAGE_DESCRIPTIONS = {
     'main.index': (
-        'Access notes, assignments, books, practicals, question papers, '
-        'and other study materials for your course.'
+        'Access college study materials, notes, assignments, books, practicals '
+        'and question papers in one place with StudyHub.'
     ),
     'main.subjects': 'Browse StudyHub subjects and find relevant course materials.',
     'main.notes_page': 'Browse notes and study resources available on StudyHub.',
@@ -56,11 +54,16 @@ PAGE_DESCRIPTIONS = {
     'main.contact': 'Contact StudyHub for help with study materials and your account.',
     'auth.login': 'Sign in to your StudyHub account to access your study materials.',
     'auth.register': 'Create a StudyHub account to access notes, books, and course resources.',
+    'auth.forgot_password': 'Request help resetting the password for your StudyHub account.',
+    'auth.reset_password': 'Set a new password for your StudyHub account.',
 }
 
 
 def _public_origin():
-    configured = (current_app.config.get('PUBLIC_BASE_URL') or '').strip()
+    configured = current_app.config.get('PUBLIC_BASE_URL')
+    if not isinstance(configured, str):
+        return ''
+    configured = configured.strip()
     if not configured:
         return ''
 
@@ -168,12 +171,12 @@ def build_seo_context():
         'canonical_url': absolute_public_url(path) if is_public else '',
         'og_image_url': (
             absolute_public_url(image_path)
-            if os.path.isfile(image_file)
+            if is_public and os.path.isfile(image_file)
             else ''
         ),
         'og_image_secure_url': (
             absolute_public_url(image_path)
-            if os.path.isfile(image_file)
+            if is_public and os.path.isfile(image_file)
             and _public_origin().startswith('https://')
             else ''
         ),

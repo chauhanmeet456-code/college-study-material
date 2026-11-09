@@ -1,14 +1,14 @@
 # 3rd Year StudyHub
 
 A complete, modern, responsive College Study Material Management Platform built with Flask.
-Supports SQLite (development), PostgreSQL/NeonDB (production), and MySQL.
+Supports explicitly configured SQLite (optional local development), PostgreSQL/NeonDB, and MySQL.
 
 ## Features
 
 - **Student Portal**: Register, login, browse subjects, live search suggestions, view materials, download files, bookmark favorites, manage profile, and receive persistent real-time notifications
 - **Admin Panel**: Complete dashboard with subject management, material upload/management, user management, contact messages, announcements, categories, and statistics
 - **Database-Driven**: All subjects, materials, and categories managed from Admin Panel
-- **Multi-Database Support**: SQLite (default for development), PostgreSQL/NeonDB (recommended for production), MySQL
+- **Multi-Database Support**: explicitly selected SQLite (optional local development), PostgreSQL/NeonDB, and MySQL
 - **Responsive Design**: Works on mobile, tablet, and desktop with dark mode support
 - **Announcements**: Admin-published announcements are persisted as private user notifications and delivered in real time
 - **Cookie consent**: Necessary session/security cookies remain enabled; optional display preferences are opt-in
@@ -206,6 +206,7 @@ Edit `.env` based on your database choice:
 #### Option A: SQLite (Development - simplest)
 
 ```env
+DATABASE_BACKEND=sqlite
 USE_SQLITE=true
 SECRET_KEY=your_very_long_random_secret_key
 
@@ -219,11 +220,15 @@ MAIL_TIMEOUT=10
 MAIL_SEND_TIMEOUT=8
 ```
 
-#### Option B: PostgreSQL / NeonDB (Production - recommended)
+#### Option B: Local PostgreSQL
+
+Set `DEV_DATABASE_URL` to the local PostgreSQL instance in `.env`; do not put
+the Render production URL in the local environment:
 
 ```env
 USE_SQLITE=false
-DATABASE_URL=postgresql://user:password@host:5432/dbname?sslmode=require
+DATABASE_BACKEND=postgresql
+DEV_DATABASE_URL=postgresql://postgres@localhost:5432/college_study
 
 # Optional: SMTP for OTP emails
 MAIL_SERVER=smtp.gmail.com
@@ -232,11 +237,19 @@ MAIL_USERNAME=your_email@gmail.com
 MAIL_PASSWORD=your_app_password
 ```
 
-> **Note**: Explicit `USE_SQLITE=true` selects SQLite first; otherwise a configured PostgreSQL `DATABASE_URL` is used, then MySQL.
+For Render, configure the production PostgreSQL connection as `DATABASE_URL`
+in the Render environment. Local development never falls back to a remote
+`DATABASE_URL`. To use MySQL locally instead, explicitly configure the `DB_*`
+variables. SQLite is used only when `USE_SQLITE=true`; its optional path can be
+set with `SQLITE_DB`. Set `DATABASE_BACKEND=sqlite` to choose SQLite even when
+a development PostgreSQL URL is also present.
 
 ### Step 5: Initialize Database
 
 #### For SQLite:
+
+Set `DATABASE_BACKEND=sqlite` in the local `.env` first; SQLite is never
+selected automatically and is disabled on Render.
 
 ```bash
 python init_sqlite.py
@@ -350,15 +363,20 @@ part of the required persistence layer.
 
 ## Database
 
-The application supports three database backends with automatic selection:
+The application supports three database backends with explicit environment
+selection:
 
 | Backend    | Config                         | Use Case               |
 | ---------- | ------------------------------ | ---------------------- |
 | SQLite     | `USE_SQLITE=true`              | Local development      |
-| PostgreSQL | `DATABASE_URL=<url>`           | Production (NeonDB)    |
-| MySQL      | Default (no SQLite/PostgreSQL) | Alternative production |
+| PostgreSQL | `DEV_DATABASE_URL` locally; `DATABASE_URL` on Render | Local or production |
+| MySQL      | Explicit `DB_HOST`, `DB_NAME`, and `DB_USER` | Local/alternative deployment |
 
-**Connection Priority**: `USE_SQLITE=true` (SQLite) > `DATABASE_URL` (PostgreSQL) > MySQL default
+Render requires `DATABASE_URL` and never falls back to SQLite or MySQL. Locally,
+`DEV_DATABASE_URL` or `LOCAL_DATABASE_URL` selects PostgreSQL when configured;
+otherwise `USE_SQLITE=true` selects SQLite or explicit `DB_*` settings select
+MySQL. Set `DATABASE_BACKEND=postgresql` to require a local PostgreSQL URL.
+A production `DATABASE_URL` is never selected locally.
 
 The database abstraction layer (`utils/database.py`) handles:
 

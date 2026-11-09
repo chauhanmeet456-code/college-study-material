@@ -17,7 +17,7 @@ from utils.decorators import admin_required
 from utils.auth import get_current_admin
 from utils.database import immediate_transaction
 from utils.helpers import allowed_file, generate_safe_filename, get_category_subdir
-from utils.security import csrf_protect
+from utils.security import csrf_protect, safe_redirect_target
 import secrets
 from datetime import timedelta
 from config import Config
@@ -437,15 +437,17 @@ def view_user(user_id):
                            active_session=session_row)
 
 
-@admin_bp.route('/users/activate/<int:user_id>')
+@admin_bp.route('/users/activate/<int:user_id>', methods=['POST'])
 @admin_required
+@csrf_protect
 def activate_user(user_id):
     User.restore(user_id)
     flash('User activated.', 'success')
     return redirect(url_for('admin.users_list'))
 
-@admin_bp.route('/users/deactivate/<int:user_id>')
+@admin_bp.route('/users/deactivate/<int:user_id>', methods=['POST'])
 @admin_required
+@csrf_protect
 def deactivate_user(user_id):
     User.update(user_id, is_active=0)
     flash('User deactivated.', 'success')
@@ -455,7 +457,10 @@ def deactivate_user(user_id):
 @admin_required
 @csrf_protect
 def delete_user(user_id):
-    next_url = request.form.get('next') or request.referrer or url_for('admin.users_list')
+    next_url = safe_redirect_target(
+        request.form.get('next'),
+        safe_redirect_target(request.referrer, url_for('admin.users_list')),
+    )
     user = User.get_by_id(user_id)
     if not user:
         flash('User not found.', 'danger')

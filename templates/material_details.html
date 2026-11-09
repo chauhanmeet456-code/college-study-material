@@ -28,6 +28,11 @@
                 </div>
             </div>
             <p class="text-secondary mb-3">{{ material.description }}</p>
+            {% if not file_exists %}
+            <div class="alert alert-warning" role="status">
+                This material's file is currently unavailable on the server. Its details are still available.
+            </div>
+            {% endif %}
             <div class="row g-3 text-sm">
                 <div class="col-sm-6 col-md-3">
                     <small class="text-muted d-block">File Name</small>
@@ -50,6 +55,7 @@
     </div>
 
     <div class="d-flex gap-2 flex-wrap">
+        {% if file_exists %}
         {% if is_video %}
         <a href="{{ url_for('main.view_material', material_id=material.id) }}" class="btn btn-primary" target="_blank">
             <i class="fas fa-play me-1"></i>Play Video
@@ -62,6 +68,7 @@
         <a href="{{ url_for('main.download_material', material_id=material.id) }}" class="btn btn-success">
             <i class="fas fa-download me-1"></i>Download
         </a>
+        {% endif %}
         {% if current_user %}
             <button class="btn btn-outline-danger" onclick="toggleFavorite({{ material.id }})">
                 <i class="{% if material.is_favorited %}fas{% else %}far{% endif %} fa-heart me-1" id="fav-icon-{{ material.id }}"></i>

@@ -10,41 +10,74 @@
         </div>
     </div>
     {% endif %}
-    <div class="pdf-toolbar">
-        <button class="btn btn-outline-secondary btn-sm" onclick="history.back()"><i class="fas fa-arrow-left"></i></button>
+
+    <div class="pdf-toolbar mb-3 d-flex align-items-center gap-2 p-2 bg-dark text-white rounded">
+        <a href="{{ url_for('main.material_details', material_id=material.id) }}" class="btn btn-outline-light btn-sm" title="Back to details"><i class="fas fa-arrow-left"></i></a>
         <span class="fw-semibold text-truncate d-none d-sm-inline" style="max-width:300px;">{{ material.title }}</span>
         <span class="fw-semibold text-truncate d-sm-none" style="max-width:150px;">{{ material.title }}</span>
         <div class="ms-auto d-flex gap-1 flex-wrap">
-            <button class="btn btn-outline-secondary btn-sm" onclick="zoomOut()"><i class="fas fa-search-minus"></i></button>
-            <span class="btn btn-outline-secondary btn-sm" id="zoomLevel">100%</span>
-            <button class="btn btn-outline-secondary btn-sm" onclick="zoomIn()"><i class="fas fa-search-plus"></i></button>
-            <button class="btn btn-outline-secondary btn-sm d-none d-sm-inline" onclick="prevPage()"><i class="fas fa-chevron-left"></i></button>
-            <span class="btn btn-outline-secondary btn-sm d-none d-sm-inline" id="pageInfo">Page 1</span>
-            <button class="btn btn-outline-secondary btn-sm d-none d-sm-inline" onclick="nextPage()"><i class="fas fa-chevron-right"></i></button>
-            <button class="btn btn-outline-secondary btn-sm d-none d-md-inline" onclick="toggleFullscreen()"><i class="fas fa-expand"></i></button>
-            <a href="{{ url_for('main.download_material', material_id=material.id) }}" class="btn btn-success btn-sm" title="Download"><i class="fas fa-download"></i></a>
-            <a href="{{ url_for('static', filename=rel_path + '/' + material.file_name) }}" target="_blank" class="btn btn-primary btn-sm" title="Open in browser"><i class="fas fa-external-link-alt"></i></a>
+            {% if file_exists and not is_video %}
+            <button type="button" class="btn btn-outline-light btn-sm" onclick="zoomOut()" title="Zoom out"><i class="fas fa-search-minus"></i></button>
+            <span class="btn btn-outline-light btn-sm disabled text-white" id="zoomLevel">100%</span>
+            <button type="button" class="btn btn-outline-light btn-sm" onclick="zoomIn()" title="Zoom in"><i class="fas fa-search-plus"></i></button>
+            <button type="button" class="btn btn-outline-light btn-sm d-none d-sm-inline" onclick="prevPage()" title="Previous page"><i class="fas fa-chevron-left"></i></button>
+            <span class="btn btn-outline-light btn-sm d-none d-sm-inline disabled text-white" id="pageInfo">Page 1</span>
+            <button type="button" class="btn btn-outline-light btn-sm d-none d-sm-inline" onclick="nextPage()" title="Next page"><i class="fas fa-chevron-right"></i></button>
+            <button type="button" class="btn btn-outline-light btn-sm d-none d-md-inline" onclick="toggleFullscreen()" title="Fullscreen"><i class="fas fa-expand"></i></button>
+            {% endif %}
+            {% if file_exists %}
+            <a href="{{ url_for('main.download_material', material_id=material.id) }}" class="btn btn-success btn-sm" title="Download"><i class="fas fa-download me-1"></i><span class="d-none d-md-inline">Download</span></a>
+            <a href="{{ file_url }}" target="_blank" class="btn btn-primary btn-sm" title="Open raw file in new tab"><i class="fas fa-external-link-alt me-1"></i><span class="d-none d-md-inline">Open in Tab</span></a>
+            {% else %}
+            <a href="{{ url_for('main.material_details', material_id=material.id) }}" class="btn btn-secondary btn-sm"><i class="fas fa-info-circle me-1"></i>Details</a>
+            {% endif %}
         </div>
     </div>
-    <div class="pdf-container" id="pdfContainer">
-        {% if is_video %}
-            <video controls autoplay style="width:100%; max-height:85vh; background:#000;">
-                <source src="{{ url_for('static', filename=rel_path + '/' + material.file_name) }}" type="video/mp4">
-                Your browser does not support the video tag.
-            </video>
-        {% elif material.file_type == 'pdf' or material.file_name.lower().endswith('.pdf') %}
-            <iframe src="{{ url_for('static', filename=rel_path + '/' + material.file_name) }}" title="{{ material.title }}"></iframe>
-        {% elif material.file_type in ['doc', 'docx', 'ppt', 'pptx', 'txt'] or material.file_name.lower().endswith(('.doc', '.docx', '.ppt', '.pptx', '.txt')) %}
-            {% if material.file_type in ['ppt', 'pptx'] or material.file_name.lower().endswith(('.ppt', '.pptx')) %}
-                <div class="d-flex flex-column align-items-center justify-content-center text-white" style="min-height:600px;">
-                    <i class="fas fa-file-powerpoint fs-1 mb-3"></i>
-                    <h4>Preview not available</h4>
-                    <p class="mb-3">PowerPoint files need to be downloaded to view.</p>
-                    <a href="{{ url_for('main.download_material', material_id=material.id) }}" class="btn btn-primary">Download File</a>
+
+    <div class="pdf-container rounded overflow-hidden" id="pdfContainer" style="min-height: 650px; background: #1a1a24; position: relative;">
+        {% if not file_exists %}
+            <div class="d-flex flex-column align-items-center justify-content-center text-center p-5 text-white" style="min-height: 600px;">
+                <div class="mb-3 p-4 rounded-circle bg-dark border border-secondary shadow-sm" style="width: 90px; height: 90px; display: flex; align-items: center; justify-content: center;">
+                    <i class="fas fa-file-excel fs-1 text-warning"></i>
                 </div>
-            {% else %}
-                <iframe src="{{ url_for('static', filename=rel_path + '/' + material.file_name) }}" title="{{ material.title }}"></iframe>
-            {% endif %}
+                <h3 class="fw-bold mb-2">File Currently Unavailable</h3>
+                <p class="text-white-50 mb-4" style="max-width: 520px;">
+                    The physical file for <strong>"{{ material.title }}"</strong> is not present on this server deployment storage.
+                    The material metadata is preserved, but the document or media file could not be located.
+                </p>
+                <div class="d-flex gap-2 flex-wrap justify-content-center">
+                    <a href="{{ url_for('main.material_details', material_id=material.id) }}" class="btn btn-primary">
+                        <i class="fas fa-arrow-left me-1"></i> Back to Details
+                    </a>
+                    <a href="{{ url_for('main.subjects') }}" class="btn btn-outline-light">
+                        <i class="fas fa-book me-1"></i> Explore Other Subjects
+                    </a>
+                    <a href="{{ url_for('main.contact') }}" class="btn btn-outline-warning">
+                        <i class="fas fa-envelope me-1"></i> Report Missing File
+                    </a>
+                </div>
+            </div>
+        {% elif is_video %}
+            <div class="d-flex justify-content-center align-items-center bg-black" style="min-height: 600px;">
+                <video controls autoplay playsinline style="width:100%; max-height:85vh; background:#000;">
+                    <source src="{{ file_url }}" type="{{ file_mime_type }}">
+                    Your browser does not support the video tag.
+                </video>
+            </div>
+        {% elif material.file_type == 'pdf' or (material.file_name and material.file_name.lower().endswith('.pdf')) %}
+            <iframe src="{{ file_url }}#view=FitH" title="{{ material.title }}" style="width: 100%; height: 80vh; border: none; background: #fff;"></iframe>
+        {% elif material.file_type in ['doc', 'docx', 'ppt', 'pptx'] or (material.file_name and material.file_name.lower().endswith(('.doc', '.docx', '.ppt', '.pptx'))) %}
+            <div class="d-flex flex-column align-items-center justify-content-center text-center p-5 text-white" style="min-height:600px;">
+                <i class="fas fa-file-powerpoint fs-1 mb-3 text-info"></i>
+                <h4 class="fw-bold mb-2">Office Document Preview</h4>
+                <p class="text-white-50 mb-4" style="max-width: 480px;">Office presentations and documents are best viewed locally or can be opened directly.</p>
+                <div class="d-flex gap-2">
+                    <a href="{{ url_for('main.download_material', material_id=material.id) }}" class="btn btn-success"><i class="fas fa-download me-1"></i> Download File</a>
+                    <a href="{{ file_url }}" target="_blank" class="btn btn-outline-light"><i class="fas fa-external-link-alt me-1"></i> Open Raw</a>
+                </div>
+            </div>
+        {% else %}
+            <iframe src="{{ file_url }}" title="{{ material.title }}" style="width: 100%; height: 80vh; border: none; background: #fff;"></iframe>
         {% endif %}
     </div>
 </div>
@@ -52,11 +85,57 @@
 {% block extra_js %}
 <script>
     let currentZoom = 100;
+    let currentPage = 1;
     const zoomLevel = document.getElementById('zoomLevel');
     const pageInfo = document.getElementById('pageInfo');
-    function zoomIn() { currentZoom = Math.min(currentZoom + 25, 200); applyZoom(); }
-    function zoomOut() { currentZoom = Math.max(currentZoom - 25, 50); applyZoom(); }
-    function applyZoom() { zoomLevel.textContent = currentZoom + '%'; const iframe = document.querySelector('#pdfContainer iframe'); if (iframe) iframe.style.transform = 'scale(' + (currentZoom / 100) + ')'; }
-    function toggleFullscreen() { const el = document.getElementById('pdfContainer'); if (document.fullscreenElement) document.exitFullscreen(); else el.requestFullscreen(); }
+
+    function zoomIn() {
+        currentZoom = Math.min(currentZoom + 25, 200);
+        applyZoom();
+    }
+    function zoomOut() {
+        currentZoom = Math.max(currentZoom - 25, 50);
+        applyZoom();
+    }
+    function applyZoom() {
+        if (zoomLevel) zoomLevel.textContent = currentZoom + '%';
+        const iframe = document.querySelector('#pdfContainer iframe');
+        if (iframe) {
+            iframe.style.transform = 'scale(' + (currentZoom / 100) + ')';
+            iframe.style.transformOrigin = 'top center';
+        }
+    }
+    function prevPage() {
+        if (currentPage > 1) {
+            currentPage--;
+            updatePage();
+        }
+    }
+    function nextPage() {
+        currentPage++;
+        updatePage();
+    }
+    function updatePage() {
+        if (pageInfo) pageInfo.textContent = 'Page ' + currentPage;
+        const iframe = document.querySelector('#pdfContainer iframe');
+        if (iframe && iframe.src) {
+            try {
+                const url = new URL(iframe.src, window.location.origin);
+                url.hash = 'page=' + currentPage;
+                iframe.src = url.toString();
+            } catch (e) {
+                // Ignore navigation hash update errors
+            }
+        }
+    }
+    function toggleFullscreen() {
+        const el = document.getElementById('pdfContainer');
+        if (!el) return;
+        if (document.fullscreenElement) {
+            document.exitFullscreen();
+        } else {
+            el.requestFullscreen().catch(() => {});
+        }
+    }
 </script>
 {% endblock %}
