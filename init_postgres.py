@@ -96,6 +96,33 @@ CREATE TABLE IF NOT EXISTS materials (
     FOREIGN KEY (uploaded_by) REFERENCES admins(id) ON DELETE SET NULL
 );
 
+DO $studyhub$
+BEGIN
+    IF (
+        SELECT COUNT(*) = 3
+        FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'materials'
+          AND column_name IN ('category_id', 'is_active', 'uploaded_at')
+    ) THEN
+        CREATE INDEX IF NOT EXISTS idx_materials_category_active_uploaded
+            ON materials(category_id, is_active, uploaded_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_materials_active_uploaded
+            ON materials(is_active, uploaded_at DESC);
+    END IF;
+    IF (
+        SELECT COUNT(*) = 2
+        FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'materials'
+          AND column_name IN ('subject_id', 'is_active')
+    ) THEN
+        CREATE INDEX IF NOT EXISTS idx_materials_subject_active
+            ON materials(subject_id, is_active);
+    END IF;
+END
+$studyhub$;
+
 CREATE TABLE IF NOT EXISTS favorites (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL,

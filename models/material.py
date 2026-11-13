@@ -194,6 +194,36 @@ class Material:
             conn.close()
 
     @staticmethod
+    def get_by_category_name(category_name, page=1, per_page=12):
+        conn = get_connection()
+        cursor = None
+        try:
+            offset = (page - 1) * per_page
+            cursor = get_cursor(conn)
+            cursor.execute("""
+                SELECT m.*, s.name as subject_name, s.code as subject_code,
+                       c.name as category_name
+                FROM materials m
+                JOIN subjects s ON m.subject_id = s.id
+                JOIN categories c ON m.category_id = c.id
+                WHERE c.name = ? AND m.is_active = 1
+                ORDER BY m.uploaded_at DESC
+                LIMIT ? OFFSET ?
+            """, (category_name, per_page, offset))
+            materials = cursor.fetchall()
+            cursor.execute("""
+                SELECT COUNT(*) AS total
+                FROM materials m
+                JOIN categories c ON m.category_id = c.id
+                WHERE c.name = ? AND m.is_active = 1
+            """, (category_name,))
+            total = cursor.fetchone()['total']
+            return materials, total
+        finally:
+            close_cursor(cursor)
+            conn.close()
+
+    @staticmethod
     def get_by_subject(subject_id, category_id=None, page=1, per_page=12):
         conn = get_connection()
         cursor = None

@@ -867,6 +867,12 @@ def ensure_schema_extensions():
                     "CREATE INDEX IF NOT EXISTS idx_materials_featured ON materials(is_featured)",
                     "CREATE INDEX IF NOT EXISTS idx_materials_category ON materials(category_id)",
                     "CREATE INDEX IF NOT EXISTS idx_materials_subject ON materials(subject_id)",
+                    "CREATE INDEX IF NOT EXISTS idx_materials_category_active_uploaded "
+                    "ON materials(category_id, is_active, uploaded_at DESC)",
+                    "CREATE INDEX IF NOT EXISTS idx_materials_subject_active "
+                    "ON materials(subject_id, is_active)",
+                    "CREATE INDEX IF NOT EXISTS idx_materials_active_uploaded "
+                    "ON materials(is_active, uploaded_at DESC)",
                 ):
                     try:
                         conn.execute(idx_stmt)

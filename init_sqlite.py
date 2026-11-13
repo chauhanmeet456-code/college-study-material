@@ -333,6 +333,32 @@ def init_sqlite():
         except sqlite3.OperationalError:
             pass
 
+    material_columns = {
+        row[1] for row in cursor.execute("PRAGMA table_info(materials)").fetchall()
+    }
+    for index_name, required_columns, index_columns in (
+        (
+            "idx_materials_category_active_uploaded",
+            {"category_id", "is_active", "uploaded_at"},
+            "category_id, is_active, uploaded_at DESC",
+        ),
+        (
+            "idx_materials_subject_active",
+            {"subject_id", "is_active"},
+            "subject_id, is_active",
+        ),
+        (
+            "idx_materials_active_uploaded",
+            {"is_active", "uploaded_at"},
+            "is_active, uploaded_at DESC",
+        ),
+    ):
+        if required_columns.issubset(material_columns):
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS {} ON materials ({})".format(
+                    index_name, index_columns
+                )
+            )
     conn.commit()
     conn.close()
     print("SQLite database initialized successfully!")

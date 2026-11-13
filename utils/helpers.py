@@ -1,5 +1,21 @@
 from werkzeug.utils import secure_filename
+from flask import abort, request
 from config import Config
+
+
+def positive_query_int(name, default=1):
+    """Parse a positive integer query argument or return a controlled 400."""
+    raw_value = request.args.get(name)
+    if raw_value is None:
+        return default
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        abort(400, description="Query parameter '{}' must be a positive integer.".format(name))
+    if value < 1:
+        abort(400, description="Query parameter '{}' must be a positive integer.".format(name))
+    return value
+
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in Config.ALLOWED_EXTENSIONS

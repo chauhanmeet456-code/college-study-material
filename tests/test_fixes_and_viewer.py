@@ -123,6 +123,22 @@ def test_privacy_policy_route(app_with_test_data):
     assert 'Changes and contact' in html
 
 
+@pytest.mark.parametrize(
+    'path',
+    (
+        '/notes?page=invalid',
+        '/assignments?page=0',
+        '/search?page=not-a-number',
+        '/search?subject=invalid',
+        '/api/search?category=invalid',
+    ),
+)
+def test_invalid_public_pagination_and_filter_values_return_400(app_with_test_data, path):
+    response = app_with_test_data.test_client().get(path)
+
+    assert response.status_code == 400
+
+
 def test_terms_of_service_route(app_with_test_data):
     """Test that /terms-of-service returns 200, works without login, and has proper structure."""
     client = app_with_test_data.test_client()

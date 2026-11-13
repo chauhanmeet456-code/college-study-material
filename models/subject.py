@@ -58,6 +58,26 @@ class Subject:
             conn.close()
 
     @staticmethod
+    def get_all_with_material_counts():
+        conn = get_connection()
+        cursor = None
+        try:
+            cursor = get_cursor(conn)
+            cursor.execute("""
+                SELECT s.*, COUNT(m.id) AS material_count
+                FROM subjects s
+                LEFT JOIN materials m
+                    ON m.subject_id = s.id AND m.is_active = 1
+                WHERE s.is_active = 1
+                GROUP BY s.id
+                ORDER BY s.name ASC
+            """)
+            return cursor.fetchall()
+        finally:
+            close_cursor(cursor)
+            conn.close()
+
+    @staticmethod
     def get_all_admin(search='', status='all', page=1, per_page=10):
         conn = get_connection()
         cursor = None

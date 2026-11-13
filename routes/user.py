@@ -21,7 +21,11 @@ from utils.database import immediate_transaction
 from utils.decorators import user_required
 from utils.auth import get_current_user
 from utils.device import get_request_device_info
-from utils.helpers import allowed_image_file, generate_safe_filename
+from utils.helpers import (
+    allowed_image_file,
+    generate_safe_filename,
+    positive_query_int,
+)
 from utils.otp import OTPManager
 from utils.security import csrf_protect
 from models.notification import Notification
@@ -87,7 +91,7 @@ def profile():
 @user_required
 def favorites():
     from models.material import Favorite
-    page = int(request.args.get('page', 1))
+    page = positive_query_int('page')
     materials, total = Favorite.get_by_user(session['user_id'], page=page, per_page=12)
     return render_template('user/favorites.html', materials=materials, total=total, page=page, current_user=get_current_user())
 
@@ -298,7 +302,7 @@ def _current_session_row():
 def login_history():
     """A user's own login history, active sessions and revocation controls."""
     user_id = session['user_id']
-    page = int(request.args.get('page', 1))
+    page = positive_query_int('page')
     event_type = request.args.get('event_type') or None
 
     history, total = LoginHistory.get_for_user(

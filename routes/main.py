@@ -35,6 +35,7 @@ from utils.cookie_consent import (
     MAX_AGE as COOKIE_CONSENT_MAX_AGE,
     serialize_cookie_preferences,
 )
+from utils.helpers import positive_query_int
 
 logger = logging.getLogger('studyhub.main')
 main_bp = Blueprint('main', __name__)
@@ -176,21 +177,15 @@ def api_search():
     category_filter = request.args.get('category', '')
     file_type_filter = request.args.get('file_type', '')
     sort = request.args.get('sort', 'latest')
-    page = int(request.args.get('page', 1))
+    page = positive_query_int('page')
     
     filters = {}
     if query:
         filters['search'] = query
     if subject_filter:
-        try:
-            filters['subject_id'] = int(subject_filter)
-        except ValueError:
-            pass
+        filters['subject_id'] = positive_query_int('subject')
     if category_filter:
-        try:
-            filters['category_id'] = int(category_filter)
-        except ValueError:
-            pass
+        filters['category_id'] = positive_query_int('category')
     if file_type_filter:
         filters['file_type'] = file_type_filter
     
@@ -280,26 +275,7 @@ def index():
 
 @main_bp.route('/subjects')
 def subjects():
-    all_subjects = Subject.get_all(active_only=True)
-    if all_subjects:
-        subject_ids = [s['id'] for s in all_subjects]
-        conn = get_connection()
-        cursor = get_cursor(conn)
-        placeholders = ','.join(['?'] * len(subject_ids))
-        cursor.execute(f"""
-            SELECT subject_id, COUNT(*) as count 
-            FROM materials 
-            WHERE subject_id IN ({placeholders}) AND is_active = 1
-            GROUP BY subject_id
-        """, subject_ids)
-        counts = {row['subject_id']: row['count'] for row in cursor.fetchall()}
-        close_cursor(cursor)
-        conn.close()
-        for subject in all_subjects:
-            subject['material_count'] = counts.get(subject['id'], 0)
-    else:
-        # No subjects, so no need to query
-        pass
+    all_subjects = Subject.get_all_with_material_counts()
     return render_template(
         'subjects.html',
         subjects=all_subjects,
@@ -315,7 +291,7 @@ def subject_details(subject_id):
         abort(404)
     from models.subject import Category
     categories = Category.get_all()
-    page = int(request.args.get('page', 1))
+    page = positive_query_int('page')
     category_filter = request.args.get('category', None)
     cat_id = None
     if category_filter:
@@ -495,80 +471,45 @@ def favicon():
 
 @main_bp.route('/notes')
 def notes_page():
-    from models.subject import Category
-    from flask import request
-    category = Category.get_by_name('Notes')
-    if not category:
-        return render_template('notes.html', materials=[], total=0, page=1, current_user=get_current_user())
-    page = int(request.args.get('page', 1))
-    materials, total = Material.get_by_category(category['id'], page=page, per_page=12)
-    return render_template('notes.html', materials=materials, total=total, page=page, current_user=get_current_user())
+    return _material_category_page('Notes', 'notes.html')
 
 @main_bp.route('/assignments')
 def assignments_page():
-    from models.subject import Category
-    from flask import request
-    category = Category.get_by_name('Assignment')
-    if not category:
-        return render_template('assignments.html', materials=[], total=0, page=1, current_user=get_current_user())
-    page = int(request.args.get('page', 1))
-    materials, total = Material.get_by_category(category['id'], page=page, per_page=12)
-    return render_template('assignments.html', materials=materials, total=total, page=page, current_user=get_current_user())
+    return _material_category_page('Assignment', 'assignments.html')
 
 @main_bp.route('/books')
 def books_page():
-    from models.subject import Category
-    from flask import request
-    category = Category.get_by_name('Book')
-    if not category:
-        return render_template('books.html', materials=[], total=0, page=1, current_user=get_current_user())
-    page = int(request.args.get('page', 1))
-    materials, total = Material.get_by_category(category['id'], page=page, per_page=12)
-    return render_template('books.html', materials=materials, total=total, page=page, current_user=get_current_user())
+    return _material_category_page('Book', 'books.html')
 
 @main_bp.route('/practicals')
 def practicals_page():
-    from models.subject import Category
-    from flask import request
-    category = Category.get_by_name('Practical')
-    if not category:
-        return render_template('practicals.html', materials=[], total=0, page=1, current_user=get_current_user())
-    page = int(request.args.get('page', 1))
-    materials, total = Material.get_by_category(category['id'], page=page, per_page=12)
-    return render_template('practicals.html', materials=materials, total=total, page=page, current_user=get_current_user())
+    return _material_category_page('Practical', 'practicals.html')
 
 @main_bp.route('/question-papers')
 def question_papers_page():
-    from models.subject import Category
-    from flask import request
-    category = Category.get_by_name('Question Paper')
-    if not category:
-        return render_template('question_papers.html', materials=[], total=0, page=1, current_user=get_current_user())
-    page = int(request.args.get('page', 1))
-    materials, total = Material.get_by_category(category['id'], page=page, per_page=12)
-    return render_template('question_papers.html', materials=materials, total=total, page=page, current_user=get_current_user())
+    return _material_category_page('Question Paper', 'question_papers.html')
 
 @main_bp.route('/important-questions')
 def important_questions_page():
-    from models.subject import Category
-    from flask import request
-    category = Category.get_by_name('Important Question')
-    if not category:
-        return render_template('important_questions.html', materials=[], total=0, page=1, current_user=get_current_user())
-    page = int(request.args.get('page', 1))
-    materials, total = Material.get_by_category(category['id'], page=page, per_page=12)
-    return render_template('important_questions.html', materials=materials, total=total, page=page, current_user=get_current_user())
+    return _material_category_page('Important Question', 'important_questions.html')
 
 @main_bp.route('/syllabus')
 def syllabus_page():
-    from models.subject import Category
-    from flask import request
-    category = Category.get_by_name('Syllabus')
-    if not category:
-        return render_template('syllabus.html', materials=[], total=0, page=1, current_user=get_current_user())
-    page = int(request.args.get('page', 1))
-    materials, total = Material.get_by_category(category['id'], page=page, per_page=12)
-    return render_template('syllabus.html', materials=materials, total=total, page=page, current_user=get_current_user())
+    return _material_category_page('Syllabus', 'syllabus.html')
+
+
+def _material_category_page(category_name, template_name):
+    page = positive_query_int('page')
+    materials, total = Material.get_by_category_name(
+        category_name, page=page, per_page=12
+    )
+    return render_template(
+        template_name,
+        materials=materials,
+        total=total,
+        page=page,
+        current_user=get_current_user(),
+    )
 
 @main_bp.route('/search')
 def search():
@@ -578,14 +519,14 @@ def search():
     category_filter = request.args.get('category', '')
     file_type_filter = request.args.get('file_type', '')
     sort = request.args.get('sort', 'latest')
-    page = int(request.args.get('page', 1))
+    page = positive_query_int('page')
     filters = {}
     if query:
         filters['search'] = query
     if subject_filter:
-        filters['subject_id'] = int(subject_filter)
+        filters['subject_id'] = positive_query_int('subject')
     if category_filter:
-        filters['category_id'] = int(category_filter)
+        filters['category_id'] = positive_query_int('category')
     if file_type_filter:
         filters['file_type'] = file_type_filter
     materials, total = Material.get_all(filters=filters, sort=sort, page=page, per_page=12)

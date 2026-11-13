@@ -16,7 +16,12 @@ from models.user import User
 from utils.decorators import admin_required
 from utils.auth import get_current_admin
 from utils.database import immediate_transaction
-from utils.helpers import allowed_file, generate_safe_filename, get_category_subdir
+from utils.helpers import (
+    allowed_file,
+    generate_safe_filename,
+    get_category_subdir,
+    positive_query_int,
+)
 from utils.security import csrf_protect, safe_redirect_target
 import secrets
 from datetime import timedelta
@@ -82,14 +87,11 @@ def admin_logout():
 @admin_bp.route('/dashboard')
 @admin_required
 def dashboard():
-    total_students = 0
-    total_materials = 0
-    total_subjects = 0
-    total_downloads = 0
-    total_views = 0
+    from utils.database import close_cursor, get_connection, get_cursor
+
+    conn = get_connection()
+    cursor = None
     try:
-        from utils.database import get_connection, get_cursor, close_cursor
-        conn = get_connection()
         cursor = get_cursor(conn)
         cursor.execute("""
             SELECT
@@ -97,37 +99,39 @@ def dashboard():
                 (SELECT COUNT(*) FROM subjects WHERE is_active = 1) as total_subjects,
                 (SELECT COUNT(*) FROM materials WHERE is_active = 1) as total_materials,
                 (SELECT COALESCE(SUM(download_count), 0) FROM materials) as total_downloads,
-                (SELECT COALESCE(SUM(view_count), 0) FROM materials) as total_views
+                (SELECT COALESCE(SUM(view_count), 0) FROM materials) as total_views,
+                (SELECT COUNT(*) FROM materials m JOIN categories c ON c.id = m.category_id
+                    WHERE c.name = 'Notes' AND m.is_active = 1) as total_notes,
+                (SELECT COUNT(*) FROM materials m JOIN categories c ON c.id = m.category_id
+                    WHERE c.name = 'Assignment' AND m.is_active = 1) as total_assignments,
+                (SELECT COUNT(*) FROM materials m JOIN categories c ON c.id = m.category_id
+                    WHERE c.name = 'Book' AND m.is_active = 1) as total_books,
+                (SELECT COUNT(*) FROM materials m JOIN categories c ON c.id = m.category_id
+                    WHERE c.name = 'Practical' AND m.is_active = 1) as total_practicals
         """)
         row = cursor.fetchone()
-        total_students = row['total_students']
-        total_subjects = row['total_subjects']
-        total_materials = row['total_materials']
-        total_downloads = row['total_downloads']
-        total_views = row['total_views']
-        close_cursor(cursor)
+    finally:
+        if cursor:
+            close_cursor(cursor)
         conn.close()
-    except Exception as e:
-        pass
-    all_subjects = Subject.get_all(active_only=False)
-    all_materials = Material.get_all_admin(per_page=100)[0]
-    total_notes = sum(1 for m in all_materials if m.get('category_name') == 'Notes')
-    total_assignments = sum(1 for m in all_materials if m.get('category_name') == 'Assignment')
-    total_books = sum(1 for m in all_materials if m.get('category_name') == 'Book')
-    total_practicals = sum(1 for m in all_materials if m.get('category_name') == 'Practical')
+
     return render_template('admin/dashboard.html', admin=get_current_admin(),
-                           total_students=total_students, total_subjects=total_subjects,
-                           total_materials=total_materials, total_notes=total_notes,
-                           total_assignments=total_assignments, total_books=total_books,
-                           total_practicals=total_practicals, total_downloads=total_downloads,
-                           total_views=total_views)
+                           total_students=row['total_students'],
+                           total_subjects=row['total_subjects'],
+                           total_materials=row['total_materials'],
+                           total_notes=row['total_notes'],
+                           total_assignments=row['total_assignments'],
+                           total_books=row['total_books'],
+                           total_practicals=row['total_practicals'],
+                           total_downloads=row['total_downloads'],
+                           total_views=row['total_views'])
 
 @admin_bp.route('/subjects')
 @admin_required
 def subjects_list():
     search = request.args.get('search', '')
     status = request.args.get('status', 'all')
-    page = int(request.args.get('page', 1))
+    page = positive_query_int('page')
     subjects, total = Subject.get_all_admin(search=search, status=status, page=page, per_page=10)
     return render_template('admin/subjects.html', subjects=subjects, total=total, page=page,
                            search=search, status=status, admin=get_current_admin())
@@ -187,7 +191,7 @@ def materials_list():
     category_id = request.args.get('category_id', None)
     featured = request.args.get('featured', None)
     status = request.args.get('status', 'all')
-    page = int(request.args.get('page', 1))
+    page = positive_query_int('page')
     if featured == '1':
         featured = 1
     elif featured == '0':
@@ -388,7 +392,7 @@ def delete_category(category_id):
 def users_list():
     search = request.args.get('search', '')
     status = request.args.get('status', 'all')
-    page = int(request.args.get('page', 1))
+    page = positive_query_int('page')
     users, total = User.get_all(search=search, status=status, page=page, per_page=10)
     deletion_requests = User.get_deletion_requests()
     deletion_count = len(deletion_requests)
@@ -406,7 +410,7 @@ def deletion_requests():
 @admin_required
 def deleted_users_list():
     search = request.args.get('search', '')
-    page = int(request.args.get('page', 1))
+    page = positive_query_int('page')
     users, total = User.get_deleted_users(search=search, page=page, per_page=10)
     end = min(page * 10, total)
     return render_template('admin/deleted_users.html', users=users, total=total, page=page,
@@ -417,7 +421,7 @@ def deleted_users_list():
 def never_logged_in_users():
     search = request.args.get('search', '')
     status = request.args.get('status', 'all')
-    page = int(request.args.get('page', 1))
+    page = positive_query_int('page')
     users, total = User.get_never_logged_in_users(search=search, status=status, page=page, per_page=10)
     return render_template('admin/never_logged_in.html', users=users, total=total, page=page,
                            search=search, status=status, admin=get_current_admin())
@@ -508,7 +512,7 @@ def delete_user(user_id):
 @admin_required
 def messages_list():
     read_filter = request.args.get('filter', 'all')
-    page = int(request.args.get('page', 1))
+    page = positive_query_int('page')
     messages, total = ContactMessage.get_all(page=page, per_page=10, read_filter=read_filter)
     return render_template('admin/messages.html', messages=messages, total=total, page=page,
                            read_filter=read_filter, admin=get_current_admin())
@@ -534,7 +538,7 @@ def delete_message(message_id):
 def announcements_list():
     search = request.args.get('search', '')
     status = request.args.get('status', 'all')
-    page = int(request.args.get('page', 1))
+    page = positive_query_int('page')
     announcements, total = Announcement.get_all_admin(search=search, status=status, page=page, per_page=10)
     return render_template('admin/announcements.html', announcements=announcements, total=total, page=page,
                            search=search, status=status, admin=get_current_admin())
@@ -746,8 +750,8 @@ def _admin_client_ip():
 @admin_required
 def user_security():
     """Overview of every user's login history and all active sessions."""
-    page = int(request.args.get('page', 1))
-    session_page = int(request.args.get('session_page', 1))
+    page = positive_query_int('page')
+    session_page = positive_query_int('session_page')
     search = request.args.get('search', '')
     event_type = request.args.get('event_type') or None
     status = request.args.get('status') or None
@@ -782,7 +786,7 @@ def user_login_history(user_id):
         flash('User not found.', 'danger')
         return redirect(url_for('admin.user_security'))
 
-    page = int(request.args.get('page', 1))
+    page = positive_query_int('page')
     event_type = request.args.get('event_type') or None
     date_from = request.args.get('date_from') or None
     date_to = request.args.get('date_to') or None
@@ -923,7 +927,7 @@ def revoke_all_user_sessions(user_id):
 @admin_required
 def admin_audit_log():
     """Administrative audit trail of security actions."""
-    page = int(request.args.get('page', 1))
+    page = positive_query_int('page')
     action = request.args.get('action') or None
     logs, total = AdminAuditLog.get_all(page=page, per_page=20, action=action)
     return render_template(
@@ -936,7 +940,7 @@ def admin_audit_log():
 @admin_required
 def failed_attempts():
     """Recent failed login attempts (passwords are never stored)."""
-    page = int(request.args.get('page', 1))
+    page = positive_query_int('page')
     search = request.args.get('search', '')
     attempts, total = FailedLoginAttempt.get_recent(
         page=page, per_page=25, email=search or None,

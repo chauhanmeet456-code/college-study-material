@@ -8,6 +8,7 @@ import pytest
 from config import Config
 from models.notification import Notification
 from models.oauth_account import OAuthAccount
+from models.subject import Subject
 from models.session import hash_session_token
 from utils.database import get_connection, get_cursor, close_cursor
 from utils.realtime import socketio
@@ -413,6 +414,33 @@ def test_homepage_autocomplete_is_only_on_hero_and_uses_active_suggestions(featu
     assert next(item for item in suggestions if item['title'] == '100% Algebra Notes')[
         'subtitle'
     ] == 'Mathematics'
+
+
+def test_subject_and_category_pages_render_with_combined_queries(feature_app):
+    client = feature_app.test_client()
+
+    subjects_response = client.get('/subjects')
+    assert subjects_response.status_code == 200
+    assert b'Mathematics' in subjects_response.data
+    subject = next(
+        row for row in Subject.get_all_with_material_counts()
+        if row['name'] == 'Mathematics'
+    )
+    assert subject['material_count'] >= 1
+    conn = get_connection()
+    cursor = get_cursor(conn)
+    cursor.execute("PRAGMA index_list('materials')")
+    indexes = {row['name'] for row in cursor.fetchall()}
+    close_cursor(cursor)
+    conn.close()
+    assert 'idx_materials_category_active_uploaded' in indexes
+
+    notes_response = client.get('/notes')
+    assert notes_response.status_code == 200
+    assert b'100% Algebra Notes' in notes_response.data
+
+    missing_category_response = client.get('/question-papers')
+    assert missing_category_response.status_code == 200
 
 
 def test_public_pages_have_absolute_page_specific_social_metadata(feature_app):
