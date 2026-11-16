@@ -279,7 +279,11 @@ class Material:
 
     @staticmethod
     def update(material_id, **kwargs):
-        allowed = ['title', 'description', 'subject_id', 'category_id', 'is_featured', 'is_active']
+        allowed = [
+            'title', 'description', 'subject_id', 'category_id',
+            'is_featured', 'is_active', 'file_name', 'file_path',
+            'file_type', 'file_size',
+        ]
         fields = [
             (key, value) for key, value in kwargs.items()
             if key in allowed

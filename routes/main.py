@@ -36,6 +36,7 @@ from utils.cookie_consent import (
     serialize_cookie_preferences,
 )
 from utils.helpers import positive_query_int
+from utils.storage import B2_PATH_PREFIX, B2StorageError, b2_key, get_storage
 
 logger = logging.getLogger('studyhub.main')
 main_bp = Blueprint('main', __name__)
@@ -73,6 +74,34 @@ def _is_path_within(base_dir, path):
         ) == os.path.realpath(base_dir)
     except (OSError, ValueError):
         return False
+
+
+def _find_unique_upload_by_name(roots, file_name):
+    """Find an exact filename only when it has one match in approved roots."""
+    matches = set()
+    wanted_name = file_name.casefold()
+    for root in roots:
+        if not os.path.isdir(root):
+            continue
+        for directory, _, filenames in os.walk(root):
+            if not any(name.casefold() == wanted_name for name in filenames):
+                continue
+            for name in filenames:
+                if name.casefold() != wanted_name:
+                    continue
+                candidate = os.path.join(directory, name)
+                if os.path.isfile(candidate) and _is_path_within(root, candidate):
+                    matches.add(os.path.realpath(candidate))
+                    if len(matches) > 1:
+                        return None
+    if len(matches) != 1:
+        return None
+    matched = matches.pop()
+    for root in roots:
+        if _is_path_within(root, matched):
+            rel_name = os.path.relpath(matched, root).replace('\\', '/')
+            return matched, rel_name
+    return None
 
 
 def resolve_material_disk_path(material):
@@ -140,8 +169,53 @@ def resolve_material_disk_path(material):
             rel_name = os.path.relpath(matched, root).replace('\\', '/')
             return matched, rel_name
 
+    # Older records may contain only a category hint (for example
+    # "notes/<name>") even though uploads were stored under another category.
+    # Resolve that legacy mismatch only when the exact filename is unique.
+    unique_match = _find_unique_upload_by_name(roots, file_name)
+    if unique_match:
+        return unique_match
+
     fallback_rel = '/'.join(raw_parts + [file_name])
     return None, fallback_rel
+
+
+def material_file_exists(material):
+    file_path = material.get('file_path') if material else None
+    if isinstance(file_path, str) and file_path.startswith(B2_PATH_PREFIX):
+        try:
+            return get_storage().object_exists(b2_key(file_path))
+        except B2StorageError:
+            logger.exception(
+                'Could not check B2 file availability for material %s.',
+                material.get('id'),
+            )
+            flash(
+                'Cloud storage is temporarily unavailable. Please try again later.',
+                'warning',
+            )
+            return False
+    disk_path, _ = resolve_material_disk_path(material)
+    return bool(disk_path and os.path.isfile(disk_path))
+
+
+def _b2_file_redirect(material, inline):
+    try:
+        storage = get_storage()
+        key = b2_key(material.get('file_path'))
+        if not storage.object_exists(key):
+            abort(404)
+        signed_url = storage.get_presigned_url(
+            key,
+            download_name=material.get('file_name'),
+            inline=inline,
+        )
+    except B2StorageError:
+        logger.exception(
+            'Could not serve B2 file for material %s.', material.get('id')
+        )
+        abort(503, description='Cloud file storage is temporarily unavailable.')
+    return redirect(signed_url, code=302)
 
 
 @main_bp.route('/api/favorites/<int:material_id>', methods=['POST'])
@@ -334,8 +408,7 @@ def material_details(material_id):
     material['is_favorited'] = is_favorited
     from utils.helpers import is_video_file
     is_video = is_video_file(material.get('file_name', ''))
-    disk_path, _ = resolve_material_disk_path(material)
-    file_exists = bool(disk_path and os.path.isfile(disk_path))
+    file_exists = material_file_exists(material)
     return render_template('material_details.html', material=material, subject=subject, current_user=current_user,
                            remaining_views=remaining_views, remaining_downloads=remaining_downloads,
                            is_video=is_video, file_exists=file_exists,
@@ -364,7 +437,7 @@ def view_material(material_id):
     is_video = is_video_file(material.get('file_name', ''))
 
     disk_path, rel_path = resolve_material_disk_path(material)
-    file_exists = bool(disk_path and os.path.isfile(disk_path))
+    file_exists = material_file_exists(material)
     file_url = url_for('main.raw_material_file', material_id=material_id)
 
     return render_template(
@@ -390,6 +463,9 @@ def raw_material_file(material_id):
     if not material or not material.get('is_active', 1):
         abort(404)
 
+    if isinstance(material.get('file_path'), str) and material['file_path'].startswith(B2_PATH_PREFIX):
+        return _b2_file_redirect(material, inline=True)
+
     disk_path, _ = resolve_material_disk_path(material)
     if not disk_path or not os.path.isfile(disk_path):
         abort(404)
@@ -407,17 +483,45 @@ def download_material(material_id):
         flash('You have reached the free download limit. Please register or login to continue downloading materials.', 'warning')
         return redirect(url_for('auth.login'))
 
-    disk_path, _ = resolve_material_disk_path(material)
-    if not disk_path or not os.path.isfile(disk_path):
+    is_b2_file = (
+        isinstance(material.get('file_path'), str)
+        and material['file_path'].startswith(B2_PATH_PREFIX)
+    )
+    disk_path = None
+    signed_url = None
+    if is_b2_file:
+        try:
+            storage = get_storage()
+            key = b2_key(material['file_path'])
+            if not storage.object_exists(key):
+                abort(404)
+            signed_url = storage.get_presigned_url(
+                key,
+                download_name=material.get('file_name'),
+                inline=False,
+            )
+        except B2StorageError:
+            logger.exception(
+                'Could not prepare B2 download for material %s.', material_id
+            )
+            abort(503, description='Cloud file storage is temporarily unavailable.')
+    else:
+        disk_path, _ = resolve_material_disk_path(material)
+    if not is_b2_file and (not disk_path or not os.path.isfile(disk_path)):
         flash('The requested file is currently unavailable on the server. Please contact support.', 'warning')
         return redirect(url_for('main.material_details', material_id=material_id))
 
     Material.increment_download(material_id)
     GuestActivity.record_download(material_id)
 
+    download_name = material.get('file_name') or (
+        os.path.basename(disk_path) if disk_path else 'material-{}'.format(material_id)
+    )
+    if is_b2_file:
+        return redirect(signed_url, code=302)
+
     directory = os.path.dirname(disk_path)
     filename = os.path.basename(disk_path)
-    download_name = material.get('file_name') or filename
     return send_from_directory(directory, filename, as_attachment=True, download_name=download_name, conditional=True)
 
 @main_bp.route('/static/uploads/<path:filepath>')

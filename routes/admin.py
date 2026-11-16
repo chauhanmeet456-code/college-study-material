@@ -1,6 +1,9 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, session, jsonify
 from werkzeug.utils import secure_filename
+import logging
+import mimetypes
 import os
+import uuid
 from datetime import datetime
 from models.admin import Admin
 from models.subject import Subject, Category
@@ -27,9 +30,124 @@ import secrets
 from datetime import timedelta
 from config import Config
 from urllib.parse import urlparse
+from utils.database import close_cursor, get_connection, get_cursor
+from utils.storage import B2_PATH_PREFIX, B2StorageError, b2_key, get_storage
 
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
+logger = logging.getLogger('studyhub.admin')
+
+
+def _upload_material_file(upload, subdir, relative_dirs=None):
+    storage = get_storage()
+    if not storage.is_configured:
+        raise B2StorageError(
+            'Backblaze B2 is not configured. Configure all B2_* environment variables.'
+        )
+    original_name = os.path.basename((upload.filename or '').replace('\\', '/'))
+    filename = generate_safe_filename(original_name)
+    safe_dirs = [
+        safe_part for safe_part in (
+            secure_filename(part) for part in (relative_dirs or [])
+        ) if safe_part
+    ]
+    key_parts = ['materials', uuid.uuid4().hex, subdir] + safe_dirs + [filename]
+    key = '/'.join(key_parts)
+    file_type = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
+    file_size, _ = storage.upload_fileobj(
+        upload.stream,
+        key,
+        content_type=upload.mimetype or mimetypes.guess_type(filename)[0],
+    )
+    return filename, B2_PATH_PREFIX + key, file_type, file_size
+
+
+def _delete_b2_file_if_unreferenced(file_path):
+    if not isinstance(file_path, str) or not file_path.startswith(B2_PATH_PREFIX):
+        return None
+    key = file_path
+    conn = None
+    cursor = None
+    try:
+        key = b2_key(file_path)
+        conn = get_connection()
+        cursor = get_cursor(conn)
+        cursor.execute('SELECT COUNT(*) AS count FROM materials WHERE file_path = ?', (file_path,))
+        if cursor.fetchone()['count']:
+            return None
+        get_storage().delete_object_versions(key)
+        return None
+    except Exception as exc:
+        logger.exception('Could not clean up unreferenced B2 object %s.', key)
+        return str(exc)
+    finally:
+        close_cursor(cursor)
+        if conn:
+            conn.close()
+
+
+def _cleanup_deleted_material_file(material):
+    file_path = material.get('file_path')
+    if isinstance(file_path, str) and file_path.startswith(B2_PATH_PREFIX):
+        return _delete_b2_file_if_unreferenced(file_path)
+
+    conn = None
+    cursor = None
+    try:
+        conn = get_connection()
+        cursor = get_cursor(conn)
+        cursor.execute(
+            'SELECT COUNT(*) AS count FROM materials '
+            'WHERE file_path = ? AND file_name = ?',
+            (file_path, material.get('file_name')),
+        )
+        if cursor.fetchone()['count']:
+            return None
+        from routes.main import resolve_material_disk_path
+        disk_path, _ = resolve_material_disk_path(material)
+        if disk_path and os.path.isfile(disk_path):
+            os.remove(disk_path)
+        return None
+    except Exception as exc:
+        logger.exception(
+            'Could not clean up deleted material file for material %s.',
+            material.get('id'),
+        )
+        return str(exc)
+    finally:
+        close_cursor(cursor)
+        if conn:
+            conn.close()
+
+
+def _delete_material_record(material_id):
+    material = Material.get_by_id(material_id)
+    if not material:
+        return False, 'Material not found.'
+    Material.delete(material_id)
+    cleanup_error = _cleanup_deleted_material_file(material)
+    if cleanup_error:
+        return True, 'Material was deleted, but file cleanup failed: {}'.format(cleanup_error)
+    return True, None
+
+
+def _uploaded_material_record(upload, title, description, subject_id, category_id,
+                              subdir, relative_dirs, uploaded_by, is_featured,
+                              is_active):
+    filename, file_path, file_type, file_size = _upload_material_file(
+        upload, subdir, relative_dirs
+    )
+    try:
+        return Material.create(
+            title, description, subject_id, category_id, filename, file_path,
+            file_type, file_size, uploaded_by, is_featured, is_active,
+        )
+    except Exception:
+        logger.exception(
+            'Material database insert failed after B2 upload; object %s may need cleanup.',
+            file_path,
+        )
+        raise
 
 @admin_bp.route('/bulk-action', methods=['POST'])
 @admin_required
@@ -43,9 +161,24 @@ def bulk_action():
         return jsonify({'success': False, 'message': 'Invalid request'})
     
     if action == 'delete':
+        deleted = 0
+        errors = []
         for id_val in ids:
-            Material.delete(int(id_val))
-        return jsonify({'success': True, 'message': f'{len(ids)} items deleted'})
+            try:
+                was_deleted, error = _delete_material_record(int(id_val))
+                deleted += int(was_deleted)
+                if error:
+                    errors.append(error)
+            except Exception:
+                logger.exception('Bulk material deletion failed for id %s.', id_val)
+                errors.append('Material {} could not be deleted.'.format(id_val))
+        return jsonify({
+            'success': not errors,
+            'message': '{} item(s) deleted{}'.format(
+                deleted,
+                '; cleanup/errors: ' + ' '.join(errors) if errors else '',
+            ),
+        })
     elif action == 'activate':
         for id_val in ids:
             Material.update(int(id_val), is_active=1)
@@ -179,8 +312,35 @@ def edit_subject(subject_id):
 @admin_required
 @csrf_protect
 def delete_subject(subject_id):
+    conn = None
+    cursor = None
+    materials = []
+    try:
+        conn = get_connection()
+        cursor = get_cursor(conn)
+        cursor.execute(
+            'SELECT id, file_path, file_name FROM materials WHERE subject_id = ?',
+            (subject_id,),
+        )
+        materials = cursor.fetchall()
+    finally:
+        close_cursor(cursor)
+        if conn:
+            conn.close()
     Subject.delete(subject_id)
-    flash('Subject deleted successfully!', 'success')
+    cleanup_errors = []
+    for material in materials:
+        error = _cleanup_deleted_material_file(material)
+        if error:
+            cleanup_errors.append(error)
+    if cleanup_errors:
+        flash(
+            'Subject deleted, but some cloud files could not be cleaned up. '
+            'Check the application logs.',
+            'warning',
+        )
+    else:
+        flash('Subject deleted successfully!', 'success')
     return redirect(url_for('admin.subjects_list'))
 
 @admin_bp.route('/materials')
@@ -235,10 +395,8 @@ def add_material():
         else:
             category = Category.get_by_id(category_id)
             subdir = get_category_subdir(category['name'] if category else 'Other')
-            upload_dir = os.path.join(Config.UPLOAD_FOLDER, subdir)
-            os.makedirs(upload_dir, exist_ok=True)
-
             saved_count = 0
+            failed_count = 0
             if 'folder' in request.files and request.files['folder'].filename != '':
                 files = request.files.getlist('folder')
                 for f in files:
@@ -246,45 +404,50 @@ def add_material():
                         continue
                     if not allowed_file(f.filename):
                         continue
-                    rel_path = os.path.relpath(os.path.dirname(f.filename), '.')
-                    safe_rel = os.path.normpath(rel_path).replace('\\', '/').lstrip('/')
-                    if safe_rel:
-                        folder_dir = os.path.join(upload_dir, safe_rel)
-                        os.makedirs(folder_dir, exist_ok=True)
-                        file_path = os.path.join(folder_dir, secure_filename(os.path.basename(f.filename)))
-                    else:
-                        file_path = os.path.join(upload_dir, secure_filename(f.filename))
-                    f.save(file_path)
-                    file_size = os.path.getsize(file_path)
-                    file_type = os.path.splitext(file_path)[1].lower().lstrip('.')
-                    file_name = os.path.basename(file_path)
-                    stored_path = os.path.join('static', 'uploads', subdir)
-                    if safe_rel:
-                        stored_path = os.path.join(stored_path, safe_rel)
-                    Material.create(title, description, int(subject_id), int(category_id), file_name,
-                                   stored_path, file_type, file_size,
-                                   session.get('admin_id'), is_featured=is_featured, is_active=is_active)
-                    saved_count += 1
+                    original_parts = f.filename.replace('\\', '/').split('/')
+                    relative_dirs = [
+                        part for part in original_parts[:-1]
+                        if part and part not in ('.', '..')
+                    ]
+                    try:
+                        _uploaded_material_record(
+                            f, title, description, int(subject_id), int(category_id),
+                            subdir, relative_dirs, session.get('admin_id'),
+                            is_featured, is_active,
+                        )
+                        saved_count += 1
+                    except B2StorageError as exc:
+                        logger.exception('Folder material upload failed.')
+                        failed_count += 1
+                        flash('A folder file could not be uploaded to cloud storage: {}'.format(exc), 'danger')
                 if saved_count == 0:
-                    flash('No valid files found in folder. Allowed: PDF, DOC, DOCX, PPT, PPTX, ZIP, TXT, Images (PNG/JPG/GIF/WebP), Video files.', 'danger')
+                    if failed_count == 0:
+                        flash('No valid files found in folder. Allowed: PDF, DOC, DOCX, PPT, PPTX, ZIP, TXT, Images (PNG/JPG/GIF/WebP), Video files.', 'danger')
                 else:
-                    flash(f'{saved_count} file(s) uploaded successfully from folder!', 'success')
+                    flash(
+                        '{} file(s) uploaded to Backblaze B2{}.'.format(
+                            saved_count,
+                            '; {} failed'.format(failed_count) if failed_count else '',
+                        ),
+                        'success' if not failed_count else 'warning',
+                    )
                     return redirect(url_for('admin.materials_list'))
             else:
                 file = request.files.get('file')
                 if not file or file.filename == '':
                     flash('No file selected.', 'danger')
                 elif file and allowed_file(file.filename):
-                    filename = generate_safe_filename(file.filename)
-                    file_path = os.path.join(upload_dir, filename)
-                    file.save(file_path)
-                    file_size = os.path.getsize(file_path)
-                    file_type = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
-                    Material.create(title, description, int(subject_id), int(category_id), filename,
-                                   os.path.join('static', 'uploads', subdir), file_type, file_size,
-                                   session.get('admin_id'), is_featured=is_featured, is_active=is_active)
-                    flash('Material uploaded successfully!', 'success')
-                    return redirect(url_for('admin.materials_list'))
+                    try:
+                        _uploaded_material_record(
+                            file, title, description, int(subject_id), int(category_id),
+                            subdir, [], session.get('admin_id'),
+                            is_featured, is_active,
+                        )
+                        flash('Material uploaded successfully to Backblaze B2!', 'success')
+                        return redirect(url_for('admin.materials_list'))
+                    except B2StorageError as exc:
+                        logger.exception('Material upload failed.')
+                        flash('Material upload failed: {}'.format(exc), 'danger')
                 else:
                     flash('Invalid file type. Allowed: PDF, DOC, DOCX, PPT, PPTX, ZIP, TXT, Images (PNG/JPG/ GIF/WebP), Video files.', 'danger')
     all_subjects = Subject.get_all(active_only=False)
@@ -309,25 +472,51 @@ def edit_material(material_id):
         if not all([title, subject_id, category_id]):
             flash('Title, subject and category are required.', 'danger')
         else:
-            Material.update(material_id, title=title, description=description, subject_id=int(subject_id),
-                           category_id=int(category_id), is_featured=is_featured, is_active=is_active)
+            update_values = {
+                'title': title,
+                'description': description,
+                'subject_id': int(subject_id),
+                'category_id': int(category_id),
+                'is_featured': is_featured,
+                'is_active': is_active,
+            }
             if 'file' in request.files and request.files['file'].filename != '':
                 file = request.files['file']
                 if file and allowed_file(file.filename):
-                    old_path = os.path.join(material['file_path'], material['file_name'])
-                    if os.path.exists(old_path):
-                        os.remove(old_path)
                     category = Category.get_by_id(int(category_id))
                     subdir = get_category_subdir(category['name'] if category else 'Other')
-                    filename = generate_safe_filename(file.filename)
-                    upload_dir = os.path.join(Config.UPLOAD_FOLDER, subdir)
-                    os.makedirs(upload_dir, exist_ok=True)
-                    file_path = os.path.join(upload_dir, filename)
-                    file.save(file_path)
-                    file_size = os.path.getsize(file_path)
-                    file_type = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
-                    Material.update_file(material_id, filename, os.path.join('static', 'uploads', subdir), file_type, file_size)
-            flash('Material updated successfully!', 'success')
+                    try:
+                        (
+                            filename, file_path, file_type, file_size
+                        ) = _upload_material_file(file, subdir)
+                    except B2StorageError as exc:
+                        logger.exception('Material replacement upload failed.')
+                        flash('Material was not updated because cloud upload failed: {}'.format(exc), 'danger')
+                        return redirect(url_for('admin.edit_material', material_id=material_id))
+                    update_values.update({
+                        'file_name': filename,
+                        'file_path': file_path,
+                        'file_type': file_type,
+                        'file_size': file_size,
+                    })
+            try:
+                Material.update(material_id, **update_values)
+            except Exception:
+                logger.exception(
+                    'Material update failed; any newly uploaded B2 object may need cleanup.'
+                )
+                raise
+            cleanup_error = None
+            if update_values.get('file_path'):
+                cleanup_error = _cleanup_deleted_material_file(material)
+            if cleanup_error:
+                flash(
+                    'Material updated, but the previous cloud file could not be cleaned up. '
+                    'Check the application logs.',
+                    'warning',
+                )
+            else:
+                flash('Material updated successfully!', 'success')
             return redirect(url_for('admin.materials_list'))
     all_subjects = Subject.get_all(active_only=False)
     all_categories = Category.get_all()
@@ -338,13 +527,13 @@ def edit_material(material_id):
 @admin_required
 @csrf_protect
 def delete_material(material_id):
-    material = Material.get_by_id(material_id)
-    if material:
-        old_path = os.path.join(material['file_path'], material['file_name'])
-        if os.path.exists(old_path):
-            os.remove(old_path)
-    Material.delete(material_id)
-    flash('Material deleted successfully!', 'success')
+    deleted, cleanup_error = _delete_material_record(material_id)
+    if not deleted:
+        flash(cleanup_error, 'warning')
+    elif cleanup_error:
+        flash(cleanup_error, 'warning')
+    else:
+        flash('Material deleted successfully!', 'success')
     return redirect(url_for('admin.materials_list'))
 
 @admin_bp.route('/categories')

@@ -225,6 +225,14 @@ class Config:
         'UPLOAD_FOLDER',
         os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'uploads')
     )
+    B2_KEY_ID = os.getenv('B2_KEY_ID', '')
+    B2_APPLICATION_KEY = os.getenv('B2_APPLICATION_KEY', '')
+    B2_BUCKET_NAME = os.getenv('B2_BUCKET_NAME', '')
+    B2_ENDPOINT_URL = os.getenv('B2_ENDPOINT_URL', '')
+    B2_REGION = os.getenv('B2_REGION', '')
+    B2_PRESIGNED_URL_EXPIRY = _positive_int(
+        os.getenv('B2_PRESIGNED_URL_EXPIRY', '600'), 600
+    )
     MAX_CONTENT_LENGTH = 5 * 1024 * 1024 * 1024
     ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'ppt', 'pptx', 'zip', 'txt', 'mp4', 'webm', 'ogg', 'avi', 'mov', 'wmv', 'flv', 'mkv', 'png', 'jpg', 'jpeg', 'gif', 'webp'}
     ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}

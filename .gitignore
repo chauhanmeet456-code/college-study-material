@@ -1,13 +1,61 @@
-.env
+
+# Python
 __pycache__/
-*.pyc
-.venv/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual Environment
 venv/
+.venv/
+env/
+
+# Environment Variables / Secrets
+.env
+.env.*
+!.env.example
+
+# Flask
 instance/
-static/uploads/*
-!static/uploads/.gitkeep
+*.log
+flask_session/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Backups
+backups/
+*.dump
+*.sql
+*.bak
+
+# Python Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
 .DS_Store
 Thumbs.db
-*.sqlite3
-*.db
-.pytest_cache/
+desktop.ini
+
+# Temporary Files
+*.tmp
+*.temp
+*.swp
+
+# Build
+build/
+dist/
+*.egg-info/
+
+# Local uploads and generated files
+uploads/

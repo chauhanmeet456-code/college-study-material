@@ -1,0 +1,61 @@
+{
+  "created_at": "2026-11-16T16:28:52Z",
+  "mode": "apply",
+  "counts": {
+    "success": 6,
+    "failed": 0,
+    "missing": 0,
+    "skipped": 0,
+    "planned": 0
+  },
+  "results": [
+    {
+      "material_id": 2,
+      "title": "OPERATING SYSTEM",
+      "source": "D:\\New folder\\New folder\\Desktop\\abcd\\Project\\college-study-material Render Deploy\\static\\uploads\\assignments\\2dbf9ad8946b4472896db5ae241aefeb.pdf",
+      "object_key": "materials/2/2dbf9ad8946b4472896db5ae241aefeb.pdf",
+      "status": "success",
+      "message": "Uploaded and verified; database file_path updated. Local file retained."
+    },
+    {
+      "material_id": 3,
+      "title": "OOPS WITH JAVA",
+      "source": "D:\\New folder\\New folder\\Desktop\\abcd\\Project\\college-study-material Render Deploy\\static\\uploads\\assignments\\58a2288e958a42dbae4cd73b419b0ab3.pdf",
+      "object_key": "materials/3/58a2288e958a42dbae4cd73b419b0ab3.pdf",
+      "status": "success",
+      "message": "Uploaded and verified; database file_path updated. Local file retained."
+    },
+    {
+      "material_id": 4,
+      "title": "DIGITAL MARKETING",
+      "source": "D:\\New folder\\New folder\\Desktop\\abcd\\Project\\college-study-material Render Deploy\\static\\uploads\\assignments\\639db582fbd84639b9855d1aa32148ba.pdf",
+      "object_key": "materials/4/639db582fbd84639b9855d1aa32148ba.pdf",
+      "status": "success",
+      "message": "Uploaded and verified; database file_path updated. Local file retained."
+    },
+    {
+      "material_id": 5,
+      "title": "CWS",
+      "source": "D:\\New folder\\New folder\\Desktop\\abcd\\Project\\college-study-material Render Deploy\\static\\uploads\\assignments\\73c586bee49847f481dbef700cb6cda8.pdf",
+      "object_key": "materials/5/73c586bee49847f481dbef700cb6cda8.pdf",
+      "status": "success",
+      "message": "Uploaded and verified; database file_path updated. Local file retained."
+    },
+    {
+      "material_id": 7,
+      "title": "Database Management",
+      "source": "D:\\New folder\\New folder\\Desktop\\abcd\\Project\\college-study-material Render Deploy\\static\\uploads\\assignments\\cc5da7580bad4dcc8e36ea693a78a104.pdf",
+      "object_key": "materials/7/cc5da7580bad4dcc8e36ea693a78a104.pdf",
+      "status": "success",
+      "message": "Uploaded and verified; database file_path updated. Local file retained."
+    },
+    {
+      "material_id": 8,
+      "title": "DSP",
+      "source": "D:\\New folder\\New folder\\Desktop\\abcd\\Project\\college-study-material Render Deploy\\static\\uploads\\practicals\\22725e77f8d04c63bbaec308c0939eff.pdf",
+      "object_key": "materials/8/22725e77f8d04c63bbaec308c0939eff.pdf",
+      "status": "success",
+      "message": "Uploaded and verified; database file_path updated. Local file retained."
+    }
+  ]
+}

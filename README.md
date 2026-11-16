@@ -37,6 +37,7 @@ college-study-material/
 ├── init_sqlite.py            # SQLite database initialization
 ├── init_postgres.py          # PostgreSQL schema initialization
 ├── migrate_to_postgres.py    # SQLite → PostgreSQL migration script
+├── migrate_materials_to_b2.py # Safe local materials → Backblaze B2 migration
 ├── models/
 │   ├── __init__.py
 │   ├── user.py
@@ -121,7 +122,8 @@ college-study-material/
 │       ├── question_papers/
 │       └── syllabus/
 ├── utils/
-│   ├── database.py       # Database abstraction layer (SQLite/PostgreSQL/MySQL)
+│   ├── database.py            # Database abstraction layer (SQLite/PostgreSQL/MySQL)
+│   ├── storage.py             # Private Backblaze B2 S3-compatible storage
 │   ├── auth.py
 │   ├── decorators.py
 │   ├── device.py
@@ -486,13 +488,159 @@ MAIL_USERNAME=your_email@gmail.com
 MAIL_PASSWORD=your_app_password
 ```
 
-### File Uploads
+### Backblaze B2 material storage
 
-Configure your web server (Nginx/Apache) to serve `/static/uploads/` or use cloud storage.
+Set `B2_KEY_ID`, `B2_APPLICATION_KEY`, `B2_BUCKET_NAME`, `B2_ENDPOINT_URL`,
+and `B2_REGION` in Render and in your local environment. Keep the bucket
+private. New material uploads use the B2 S3-compatible API; existing local
+material paths continue to work until migrated. Profile images continue using
+the existing local upload storage.
+
+Viewing and downloading B2 materials use short-lived, signed S3 URLs. The
+database stores a `b2://` object reference, not a public bucket URL. Material
+deletion removes all B2 versions only after the database record is deleted and
+only when no other material references that object.
+
+#### Check B2 storage access
+
+From the project directory, run:
+
+```powershell
+python migrate_materials_to_b2.py --check-storage
+```
+
+The command loads `.env` without overriding existing process environment
+variables, then performs an S3-compatible `HeadBucket` request using the
+configured B2 endpoint and credentials. It prints only `PASS` or `FAIL` and
+does not connect to the database or read, upload, or delete objects.
+
+#### Back up Neon before migration
+
+Create and verify a current Neon/PostgreSQL backup before changing any
+`materials.file_path` values. You can use Neon’s backup/restore facility or
+`pg_dump`. The existing Neon branch named `before-b2-migration` is a recovery
+copy, not a PostgreSQL dump file, and cannot be passed as `--backup-file`.
+Preserve that branch.
+
+For a file backup, securely provide the Production URL as
+`STUDYHUB_B2_PRODUCTION_DATABASE_URL` through your approved secret manager or
+process environment. Do not put credentials in the repository, `.env`, shell
+history, or command output. From PowerShell:
+
+```powershell
+New-Item -ItemType Directory -Force backups
+pg_dump --format=custom --no-owner --file="backups\college-study-material.dump" "$env:STUDYHUB_B2_PRODUCTION_DATABASE_URL"
+pg_restore --list "backups\college-study-material.dump"
+```
+
+Confirm `pg_dump` completed successfully and that `pg_restore --list` can read
+the dump. Keep the backup private and outside Git. The full-database backup
+route requires a valid `--backup-file`; the Neon branch does not bypass this
+check.
+
+For recovery, preserve `before-b2-migration`. If a migration problem occurs,
+first stop further migration runs. Restore the dump or use Neon point-in-time
+recovery into a separate database/branch, validate material IDs, subject
+relationships, and file paths there, then plan any Production cutover
+separately. Do not overwrite or promote the safety branch blindly: it may not
+include legitimate Production writes made after it was created. Retained local
+files and the migration report can help restore individual `file_path` values,
+but do not substitute for a database backup.
+
+##### Targeted Python rollback backup (not a full database backup)
+
+If PostgreSQL client tools such as `pg_restore` are unavailable, the script can
+create a checksum-validated JSON rollback file for exactly material IDs
+`2, 3, 4, 5, 7, and 8`. It preserves each row's `id`, `file_path`, `file_name`,
+`title`, and `file_size`; it does not contain subjects, relationships, or other
+database data, and is **not a full database backup**. Keep the Neon recovery
+branch and obtain a full dump or arrange Neon recovery separately.
+
+Create the targeted backup before migration. This command reads and verifies
+the six rows on the explicitly selected Production database but does not upload
+files or modify database records. The output path must not already exist:
+
+```powershell
+python migrate_materials_to_b2.py --target production --confirm-production-host ep-sparkling-truth-b4b9nq18-pooler.c-6.us-east-2.aws.neon.tech --create-rollback-backup "backups\studyhub-material-paths.json"
+```
+
+Verify the saved file against the same live Production rows immediately before
+proceeding:
+
+```powershell
+python migrate_materials_to_b2.py --target production --confirm-production-host ep-sparkling-truth-b4b9nq18-pooler.c-6.us-east-2.aws.neon.tech --verify-rollback-backup "backups\studyhub-material-paths.json"
+```
+
+After human review and approval, every `--apply` requires the verified
+`--rollback-backup` for these six records. Apply checks its checksum and exact
+live-row values before proceeding, limits the migration to those IDs, and
+checks the rows again before starting. A full-database dump remains strongly
+recommended; if available, pass both `--backup-file` and `--rollback-backup`.
+The archive alone is not sufficient:
+
+```powershell
+python migrate_materials_to_b2.py --target production --confirm-production-host ep-sparkling-truth-b4b9nq18-pooler.c-6.us-east-2.aws.neon.tech --apply --rollback-backup "backups\studyhub-material-paths.json" --report "reports\b2-production-migration.json"
+```
+
+To restore original paths after migration, stop further migration runs and
+review the migration report first. The guarded rollback updates only `file_path`
+for these six records, only if their other saved fields still match and each
+current path is either the saved original path or its expected deterministic
+B2 path. It runs in one database transaction. It does not delete B2 objects,
+local files, or records; clean up cloud objects only through a separately
+reviewed procedure after confirming references and recovery needs:
+
+```powershell
+python migrate_materials_to_b2.py --target production --confirm-production-host ep-sparkling-truth-b4b9nq18-pooler.c-6.us-east-2.aws.neon.tech --rollback --rollback-backup "backups\studyhub-material-paths.json"
+```
+
+#### Dry-run and migrate
+
+Run the migration from a machine that has the source local material files and
+can connect to Neon and B2. Ordinary local runs use the configured Development
+database (`DEV_DATABASE_URL`); they never use Production implicitly. For a
+Production run, securely inject `STUDYHUB_B2_PRODUCTION_DATABASE_URL` into the
+process, containing the Production PostgreSQL URL. The migration requires both
+`--target production` and the exact expected hostname confirmation, and checks
+the actual connected PostgreSQL host before reading or updating material
+records. It rejects the known Development hostname for the Production target.
+Passwords and connection URLs are not printed.
+
+```powershell
+python migrate_materials_to_b2.py --target production --confirm-production-host ep-sparkling-truth-b4b9nq18-pooler.c-6.us-east-2.aws.neon.tech --dry-run --report "reports\b2-production-dry-run.json"
+```
+
+Review the report for planned files, missing local files, and failures. Dry-run
+does not upload files or update database records. Missing files are reported
+without altering their database records. Before any apply uploads, the script
+preflights all six local PDFs for readability and size, computes their SHA-256
+digests, and verifies any pre-existing objects against those digests. A
+preflight failure aborts before uploads or database updates. Only after a human
+has reviewed the Production report and verified both the targeted rollback
+backup and the full database recovery plan should an operator separately
+approve a Production `--apply` run. The command must include
+`--target production`, the same hostname confirmation, and
+`--rollback-backup`; add `--backup-file` when a PostgreSQL archive is available.
+Do not run `--apply` until that review and approval are complete.
+
+```powershell
+python migrate_materials_to_b2.py --target production --confirm-production-host ep-sparkling-truth-b4b9nq18-pooler.c-6.us-east-2.aws.neon.tech --apply --rollback-backup "backups\studyhub-material-paths.json" --backup-file "backups\college-study-material.dump" --report "reports\b2-production-migration.json"
+```
+
+The script maps each database row to a deterministic object key, verifies
+object size and SHA-256, updates only `file_path` after verification, skips
+already-migrated records, and retains every local file. Existing B2 objects
+are verified and never overwritten when their content differs. Review the
+JSON report; migration is complete only when all records are successful or
+already verified and there are no missing or failed files.
+
+`B2_PRESIGNED_URL_EXPIRY` optionally sets the signed URL lifetime in seconds
+(default: 600). Do not commit credentials, database dumps, or `.env`.
 
 ## File Structure Notes
 
-- Uploaded files are stored in `static/uploads/` organized by category
+- Legacy local uploads remain in `static/uploads/`; new material uploads are
+  stored privately in Backblaze B2 when configured
 - Default categories: Notes, Assignment, Book, Practical, Question Paper, Important Question, Syllabus, Other
 - Supported file types: PDF, DOC, DOCX, PPT, PPTX, ZIP, TXT, images, video
 

@@ -1,8 +1,10 @@
 from types import SimpleNamespace
+from urllib.parse import urlsplit
 
 import psycopg
 
 import utils.database as database
+from config import Config
 
 
 class FakeCursor:
@@ -133,3 +135,69 @@ def test_checked_out_connection_is_idle_after_health_check(monkeypatch):
         connection.pgconn.transaction_status
         == psycopg.pq.TransactionStatus.IDLE
     )
+
+
+def test_explicit_url_pool_uses_target_url_without_touching_application_pool(
+    monkeypatch,
+):
+    production_url = (
+        'postgresql://migration:secret@production.example/neondb'
+    )
+    tls_kwargs = {
+        'sslmode': 'verify-full',
+        'sslrootcert': r'C:\certs\cacert.pem',
+    }
+    development_url = 'postgresql://dev@development.example/neondb'
+    development_pool_marker = object()
+    monkeypatch.setattr(Config, 'DATABASE_URL', development_url)
+    monkeypatch.setattr(Config, 'DATABASE_CONFIG_ERROR', None)
+    monkeypatch.setattr(
+        database._tls,
+        'pg_pool',
+        [development_pool_marker],
+        raising=False,
+    )
+    monkeypatch.setattr(database._tls, 'pg_url_pools', {}, raising=False)
+    connect_calls = []
+
+    class ExplicitConnection:
+        def __init__(self):
+            self.closed = False
+            self.pgconn = SimpleNamespace(
+                status=psycopg.pq.ConnStatus.OK,
+                transaction_status=psycopg.pq.TransactionStatus.IDLE,
+            )
+
+        def close(self):
+            self.closed = True
+            self.pgconn.status = psycopg.pq.ConnStatus.BAD
+
+    connection = ExplicitConnection()
+
+    def fake_connect(url, **kwargs):
+        connect_calls.append((url, kwargs))
+        return connection
+
+    monkeypatch.setattr(database.psycopg, 'connect', fake_connect)
+
+    wrapped = database.get_connection_for_url(
+        production_url,
+        connect_kwargs=tls_kwargs,
+    )
+
+    assert connect_calls[0][0] == production_url
+    assert urlsplit(connect_calls[0][0]).hostname == 'production.example'
+    assert connect_calls[0][1] == {
+        'row_factory': psycopg.rows.dict_row,
+        'connect_timeout': Config.DB_CONNECT_TIMEOUT,
+        'application_name': 'studyhub',
+        'sslmode': 'verify-full',
+        'sslrootcert': r'C:\certs\cacert.pem',
+    }
+    assert Config.DATABASE_URL == development_url
+    assert database._tls.pg_pool == [development_pool_marker]
+
+    wrapped.close()
+
+    assert database._tls.pg_pool == [development_pool_marker]
+    assert connection in next(iter(database._tls.pg_url_pools.values()))._connections

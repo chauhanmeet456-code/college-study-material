@@ -3,6 +3,7 @@ import time
 import threading
 import logging
 import hashlib
+import re
 from contextlib import contextmanager
 from datetime import datetime, date
 from urllib.parse import parse_qs, urlsplit
@@ -41,6 +42,26 @@ sqlite3.register_adapter(date, _adapt_datetime)
 _tls = threading.local()
 _pg_lock = threading.Lock()
 _transaction_logger = logging.getLogger("studyhub.database")
+_DATABASE_URL_ERROR_PATTERN = re.compile(
+    r"(?i)\b(?:postgres(?:ql)?|mysql)://[^\s'\"<>]+"
+)
+_DATABASE_SECRET_PATTERN = re.compile(
+    r"(?i)\b(password|passfile|sslpassword|sslkey|user|username|pgpassword)"
+    r"\s*=\s*"
+    r"('[^']*'|\"[^\"]*\"|[^\s,;]+)"
+)
+_DATABASE_ROLE_PATTERN = re.compile(
+    r"(?i)\b(user|role)\s+[\"'][^\"']+[\"']"
+)
+
+
+def _safe_database_error_text(error):
+    """Keep useful driver diagnostics while removing URLs and credentials."""
+    text = str(error or '').strip()
+    text = _DATABASE_URL_ERROR_PATTERN.sub('[database URL redacted]', text)
+    text = _DATABASE_SECRET_PATTERN.sub(r'\1=[redacted]', text)
+    text = _DATABASE_ROLE_PATTERN.sub(r'\1 [redacted]', text)
+    return text[:500]
 
 
 def dict_factory(cursor, row):
@@ -204,7 +225,9 @@ class DatabaseConnectionError(psycopg.OperationalError):
         self, message=None, *, original_error=None, host=None, port=None,
         database=None, user=None,
     ):
-        error_text = str(original_error or '').lower()
+        safe_original_error = _safe_database_error_text(original_error)
+        self.original_error = safe_original_error or None
+        error_text = safe_original_error.lower()
         if 'getaddrinfo' in error_text or '11001' in error_text:
             safe_message = (
                 "PostgreSQL DNS name resolution failed ([Errno 11001] getaddrinfo failed). "
@@ -223,7 +246,10 @@ class DatabaseConnectionError(psycopg.OperationalError):
                 "Verify the configured database credentials."
             )
         else:
-            safe_message = message or 'Could not connect to the configured PostgreSQL database.'
+            safe_message = (
+                _safe_database_error_text(message)
+                or 'Could not connect to the configured PostgreSQL database.'
+            )
         super().__init__(safe_message)
 
 
@@ -275,17 +301,35 @@ class PostgreSQLConnectionPool:
     terminated or transaction-aborted NeonDB sessions are discarded.
     """
 
-    def __init__(self, max_per_thread=None):
+    def __init__(
+        self,
+        max_per_thread=None,
+        database_url=None,
+        connect_kwargs=None,
+    ):
         self._max_per_thread = max_per_thread or Config.DB_POOL_MAX_PER_THREAD
+        self._database_url = database_url
+        self._connect_kwargs = dict(connect_kwargs or {})
+        self._connections = [] if database_url is not None else None
 
-    @staticmethod
-    def _database_key():
+    def _configured_database_url(self):
+        return (
+            self._database_url
+            if self._database_url is not None
+            else Config.DATABASE_URL
+        )
+
+    def _database_key(self):
         return hashlib.sha256(
-            (Config.DATABASE_URL or '').encode('utf-8')
+            (self._configured_database_url() or '').encode('utf-8')
         ).digest()
 
     def get(self):
-        pool = getattr(_tls, "pg_pool", None)
+        pool = (
+            self._connections
+            if self._connections is not None
+            else getattr(_tls, "pg_pool", None)
+        )
         database_key = self._database_key()
         while pool:
             conn = pool.pop()
@@ -308,10 +352,13 @@ class PostgreSQLConnectionPool:
             return
 
         conn._studyhub_last_used = time.time()
-        pool = getattr(_tls, "pg_pool", None)
-        if pool is None:
-            pool = []
-            _tls.pg_pool = pool
+        if self._connections is not None:
+            pool = self._connections
+        else:
+            pool = getattr(_tls, "pg_pool", None)
+            if pool is None:
+                pool = []
+                _tls.pg_pool = pool
         if len(pool) < self._max_per_thread:
             pool.append(conn)
         else:
@@ -389,10 +436,9 @@ class PostgreSQLConnectionPool:
         except Exception:
             pass
 
-    @staticmethod
-    def _create_connection():
-        db_url = Config.DATABASE_URL
-        if Config.DATABASE_CONFIG_ERROR:
+    def _create_connection(self):
+        db_url = self._configured_database_url()
+        if self._database_url is None and Config.DATABASE_CONFIG_ERROR:
             raise DatabaseConnectionError(Config.DATABASE_CONFIG_ERROR)
         if not db_url:
             raise DatabaseConnectionError(
@@ -424,6 +470,7 @@ class PostgreSQLConnectionPool:
                 if (host or "").lower() in ("localhost", "127.0.0.1", "::1")
                 else "require"
             )
+        connect_kwargs.update(self._connect_kwargs)
 
         max_attempts = 3
         last_exc = None
@@ -432,7 +479,7 @@ class PostgreSQLConnectionPool:
                 conn = psycopg.connect(db_url, **connect_kwargs)
                 conn.autocommit = False
                 conn._studyhub_last_used = time.time()
-                conn._studyhub_database_key = PostgreSQLConnectionPool._database_key()
+                conn._studyhub_database_key = self._database_key()
                 return conn
             except psycopg.OperationalError as exc:
                 last_exc = exc
@@ -446,11 +493,18 @@ class PostgreSQLConnectionPool:
                 if attempt < max_attempts:
                     time.sleep(0.5 * attempt)
 
+        safe_error = _safe_database_error_text(last_exc)
         _transaction_logger.error(
-            "PostgreSQL connection failed (%s)",
+            "PostgreSQL connection failed (%s): %s",
             type(last_exc).__name__ if last_exc else "unknown error",
+            safe_error or 'no driver detail was provided',
         )
         raise DatabaseConnectionError(
+            message=(
+                'PostgreSQL connection failed: {}'.format(safe_error)
+                if safe_error
+                else None
+            ),
             original_error=last_exc,
             host=host,
             port=port,
@@ -458,6 +512,36 @@ class PostgreSQLConnectionPool:
 
 
 _pg_pool = PostgreSQLConnectionPool()
+
+
+def get_connection_for_url(database_url, connect_kwargs=None):
+    """Get a pooled PostgreSQL connection isolated to an explicit URL.
+
+    This is used by tools that must select a database independently of the
+    application's normal Config.DATABASE_URL and thread-local application pool.
+    """
+    if not isinstance(database_url, str) or not database_url.strip():
+        raise DatabaseConnectionError(
+            'An explicit PostgreSQL connection URL is required.'
+        )
+    extra_connect_kwargs = dict(connect_kwargs or {})
+    pool_key_material = '{}\0{}'.format(
+        database_url,
+        repr(sorted(extra_connect_kwargs.items())),
+    )
+    pool_key = hashlib.sha256(pool_key_material.encode('utf-8')).digest()
+    pools = getattr(_tls, 'pg_url_pools', None)
+    if pools is None:
+        pools = {}
+        _tls.pg_url_pools = pools
+    pool = pools.get(pool_key)
+    if pool is None:
+        pool = PostgreSQLConnectionPool(
+            database_url=database_url,
+            connect_kwargs=extra_connect_kwargs,
+        )
+        pools[pool_key] = pool
+    return PooledConnection(pool.get(), pool)
 
 
 def get_connection():

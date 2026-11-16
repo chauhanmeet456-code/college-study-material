@@ -228,6 +228,38 @@ def test_raw_material_file_endpoint(app_with_test_data):
     assert resp_missing.status_code == 404
 
 
+def test_raw_material_file_redirects_to_private_b2_url(app_with_test_data, monkeypatch):
+    from models.material import Material
+    import routes.main as main_routes
+
+    class FakeStorage:
+        def object_exists(self, key):
+            assert key == 'materials/7/notes.pdf'
+            return True
+
+        def get_presigned_url(self, key, download_name, inline):
+            assert download_name == 'notes.pdf'
+            assert inline is True
+            return 'https://private-b2.example/signed'
+
+    monkeypatch.setattr(
+        Material,
+        'get_by_id',
+        lambda material_id: {
+            'id': material_id,
+            'is_active': 1,
+            'file_path': 'b2://materials/7/notes.pdf',
+            'file_name': 'notes.pdf',
+        },
+    )
+    monkeypatch.setattr(main_routes, 'get_storage', FakeStorage)
+
+    response = app_with_test_data.test_client().get('/material/7/file')
+
+    assert response.status_code == 302
+    assert response.headers['Location'] == 'https://private-b2.example/signed'
+
+
 def test_material_download_missing_file(app_with_test_data):
     """Test download endpoint when file is missing: redirects cleanly with flash, no crash."""
     client = app_with_test_data.test_client()
