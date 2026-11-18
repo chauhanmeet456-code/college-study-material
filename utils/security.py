@@ -202,7 +202,7 @@ def apply_security_headers(response):
         "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.googleapis.com; "
         "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdn.socket.io; "
         "font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com; "
-        "frame-src 'self' https://maps.google.com https://www.google.com https://www.openstreetmap.org; "
+        "frame-src 'self' https://maps.google.com https://www.google.com https://www.openstreetmap.org https://s3.eu-central-003.backblazeb2.com; "
         "connect-src 'self' https://cdn.jsdelivr.net wss: ws:; "
         "form-action 'self'"
     )
