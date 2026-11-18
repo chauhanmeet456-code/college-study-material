@@ -178,6 +178,62 @@ class Material:
             conn.close()
 
     @staticmethod
+    def get_popular(limit=6):
+        conn = get_connection()
+        cursor = None
+        try:
+            cursor = get_cursor(conn)
+            cursor.execute("""
+                SELECT m.id, m.title,
+                       COALESCE(SUBSTR(m.description, 1, 81), '') AS description,
+                       m.view_count, m.download_count,
+                       s.name AS subject_name, s.code AS subject_code,
+                       c.name AS category_name
+                FROM materials m
+                JOIN subjects s ON m.subject_id = s.id
+                JOIN categories c ON m.category_id = c.id
+                WHERE m.is_active = 1
+                ORDER BY m.view_count DESC, m.uploaded_at DESC
+                LIMIT ?
+            """, (limit,))
+            return cursor.fetchall()
+        finally:
+            close_cursor(cursor)
+            conn.close()
+
+    @staticmethod
+    def get_recently_viewed(session_id, limit=6):
+        if not session_id:
+            return []
+        conn = get_connection()
+        cursor = None
+        try:
+            cursor = get_cursor(conn)
+            cursor.execute("""
+                SELECT m.id, m.title,
+                       COALESCE(SUBSTR(m.description, 1, 81), '') AS description,
+                       m.view_count, m.download_count,
+                       s.name AS subject_name, s.code AS subject_code,
+                       c.name AS category_name, recent.viewed_at
+                FROM (
+                    SELECT material_id, MAX(viewed_at) AS viewed_at
+                    FROM guest_views
+                    WHERE session_id = ?
+                    GROUP BY material_id
+                ) recent
+                JOIN materials m ON m.id = recent.material_id
+                JOIN subjects s ON m.subject_id = s.id
+                JOIN categories c ON m.category_id = c.id
+                WHERE m.is_active = 1
+                ORDER BY recent.viewed_at DESC, m.id DESC
+                LIMIT ?
+            """, (session_id, limit))
+            return cursor.fetchall()
+        finally:
+            close_cursor(cursor)
+            conn.close()
+
+    @staticmethod
     def get_by_category(category_id, page=1, per_page=12):
         conn = get_connection()
         cursor = None

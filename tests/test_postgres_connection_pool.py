@@ -1,3 +1,4 @@
+import time
 from types import SimpleNamespace
 from urllib.parse import urlsplit
 
@@ -107,6 +108,9 @@ def test_neon_terminated_connection_is_discarded_on_checkout(monkeypatch):
     pool = _pool_with_empty_thread_local(monkeypatch)
     stale = FakePostgresConnection()
     stale.alive = False
+    stale._studyhub_last_used = (
+        time.time() - database._POOL_HEALTHCHECK_INTERVAL_SECONDS - 1
+    )
     database._tls.pg_pool.append(stale)
     fresh = FakePostgresConnection()
     monkeypatch.setattr(
@@ -121,20 +125,35 @@ def test_neon_terminated_connection_is_discarded_on_checkout(monkeypatch):
     assert fresh.queries == []
 
 
-def test_checked_out_connection_is_idle_after_health_check(monkeypatch):
+def test_recently_used_connection_skips_network_health_check(monkeypatch):
     pool = _pool_with_empty_thread_local(monkeypatch)
     connection = FakePostgresConnection()
+    connection._studyhub_last_used = time.time()
+    database._tls.pg_pool.append(connection)
+
+    result = pool.get()
+
+    assert result is connection
+    assert connection.queries == []
+    assert connection.rollback_calls == 0
+    assert (
+        connection.pgconn.transaction_status
+        == psycopg.pq.TransactionStatus.IDLE
+    )
+
+
+def test_idle_connection_is_health_checked_after_interval(monkeypatch):
+    pool = _pool_with_empty_thread_local(monkeypatch)
+    connection = FakePostgresConnection()
+    connection._studyhub_last_used = (
+        time.time() - database._POOL_HEALTHCHECK_INTERVAL_SECONDS - 1
+    )
     database._tls.pg_pool.append(connection)
 
     result = pool.get()
 
     assert result is connection
     assert connection.queries == ['SELECT 1']
-    assert connection.rollback_calls == 1
-    assert (
-        connection.pgconn.transaction_status
-        == psycopg.pq.TransactionStatus.IDLE
-    )
 
 
 def test_explicit_url_pool_uses_target_url_without_touching_application_pool(

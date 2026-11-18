@@ -273,8 +273,8 @@ python app.py
 
 Visit: https://college-study-material.onrender.com
 
-- **Student Site**: http://127.0.0.1:5000
-- **Admin Login**: http://127.0.0.1:5000/admin/login
+- **Student Site**: https://college-study-material.onrender.com
+- **Admin Login**: https://college-study-material.onrender.com/admin/login
 
 ### Open Graph and canonical URLs
 
@@ -305,6 +305,20 @@ admin/login pages, APIs, or authenticated responses. Dynamic responses use
 long-lived immutable browser caching. When changing the worker's cache
 structure, increment `STATIC_CACHE` in `static/service-worker.js`; activation
 removes older `studyhub-*` caches.
+
+Search filters use a delayed skeleton only while their AJAX results are
+pending; the server-rendered result list remains available without JavaScript.
+The same reusable shimmer styles support the notification dropdown's initial
+request. Reduced-motion preferences disable the shimmer animation.
+
+### Runtime performance checks
+
+The Render `Procfile` binds Gunicorn to `0.0.0.0` and Render's `PORT`.
+`/healthz` is a lightweight process health check and does not query the
+database. Slow requests include an `X-Request-ID` and request-correlated
+homepage/database timings in the logs; SQL parameters are not logged. PostgreSQL
+connections are health-checked after five seconds idle, rather than issuing a
+network probe on every in-request pool checkout.
 
 ### Legal pages
 
@@ -382,11 +396,11 @@ part of the required persistence layer.
 The application supports three database backends with explicit environment
 selection:
 
-| Backend    | Config                         | Use Case               |
-| ---------- | ------------------------------ | ---------------------- |
-| SQLite     | `USE_SQLITE=true`              | Local development      |
-| PostgreSQL | `DEV_DATABASE_URL` locally; `DATABASE_URL` on Render | Local or production |
-| MySQL      | Explicit `DB_HOST`, `DB_NAME`, and `DB_USER` | Local/alternative deployment |
+| Backend    | Config                                               | Use Case                     |
+| ---------- | ---------------------------------------------------- | ---------------------------- |
+| SQLite     | `USE_SQLITE=true`                                    | Local development            |
+| PostgreSQL | `DEV_DATABASE_URL` locally; `DATABASE_URL` on Render | Local or production          |
+| MySQL      | Explicit `DB_HOST`, `DB_NAME`, and `DB_USER`         | Local/alternative deployment |
 
 Render requires `DATABASE_URL` and never falls back to SQLite or MySQL. Locally,
 `DEV_DATABASE_URL` or `LOCAL_DATABASE_URL` selects PostgreSQL when configured;

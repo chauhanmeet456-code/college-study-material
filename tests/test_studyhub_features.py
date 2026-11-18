@@ -62,7 +62,8 @@ def feature_app(tmp_path_factory):
             related_session_id INTEGER, created_at DATETIME
         );
         CREATE TABLE guest_views (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, material_id INTEGER
+            id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, material_id INTEGER,
+            viewed_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE guest_downloads (
             id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, material_id INTEGER
@@ -448,6 +449,53 @@ def test_homepage_autocomplete_is_only_on_hero_and_uses_active_suggestions(featu
     ] == 'Mathematics'
 
 
+def test_homepage_renders_six_subjects_from_database(feature_app):
+    conn = get_connection()
+    cursor = get_cursor(conn)
+    cursor.executemany(
+        "INSERT INTO subjects (name, code, is_active, updated_at) "
+        "VALUES (?, ?, 1, ?)",
+        [
+            (
+                'Homepage Alpha {:02d}'.format(index),
+                'HP-TEST-{:02d}'.format(index),
+                '2025-01-03',
+            )
+            for index in range(1, 8)
+        ] + [('Homepage Zulu', 'HP-TEST-ZULU', '2025-01-03')],
+    )
+    conn.commit()
+    close_cursor(cursor)
+    conn.close()
+
+    try:
+        response = feature_app.test_client().get('/')
+    finally:
+        conn = get_connection()
+        cursor = get_cursor(conn)
+        cursor.execute("DELETE FROM subjects WHERE code LIKE 'HP-TEST-%'")
+        conn.commit()
+        close_cursor(cursor)
+        conn.close()
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    subjects_section = html.split(
+        '<h2 class="section-title">Popular Subjects</h2>', 1
+    )[1].split(
+        '<h2 class="section-title">Latest Materials</h2>', 1
+    )[0]
+    assert len(
+        re.findall(r'<a href="/subject/\d+" class="category-card">', subjects_section)
+    ) == 6
+    for index in range(1, 7):
+        assert 'Homepage Alpha {:02d}'.format(index) in subjects_section
+        assert 'HP-TEST-{:02d}'.format(index) in subjects_section
+    assert 'Homepage Alpha 07' not in subjects_section
+    assert 'Mathematics' not in subjects_section
+    assert 'Homepage Zulu' not in subjects_section
+
+
 def test_head_homepage_skips_database_and_matches_get_headers(
     feature_app, monkeypatch,
 ):
@@ -711,6 +759,7 @@ def test_robots_and_sitemap_only_publish_public_catalog_pages(feature_app):
         for entry in root.findall('sm:url', namespace)
     }
     assert production_origin + '/' in locations
+    assert production_origin + '/explore' in locations
     assert production_origin + '/subject/1' in locations
     assert production_origin + '/material/1' in locations
     assert not any(
@@ -764,7 +813,8 @@ def test_service_worker_manifest_and_safe_cache_headers(feature_app):
     assert worker.headers['Service-Worker-Allowed'] == '/'
     assert worker.headers['Cache-Control'] == 'no-cache'
     worker_source = worker.get_data(as_text=True)
-    assert "studyhub-static-v2" in worker_source
+    assert "studyhub-static-v3" in worker_source
+    assert "'/explore'" in worker_source
     assert "url.searchParams.get('v')" in worker_source
     assert "'/static/offline.html'" in worker_source
     assert "url.pathname.includes('/uploads/')" in worker_source
@@ -1482,3 +1532,96 @@ def _slow_template_response():
 
     time.sleep(1.01)
     return render_template_string('ok')
+
+
+def test_explore_page_uses_existing_public_catalog_and_routes(feature_app):
+    client = feature_app.test_client()
+    conn = get_connection()
+    cursor = get_cursor(conn)
+    cursor.execute(
+        "INSERT INTO materials "
+        "(title, description, subject_id, category_id, is_active, view_count) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        ('Explore fixture material', 'Material for Explore tests.', 1, 1, 1, 3),
+    )
+    material_id = cursor.lastrowid
+    conn.commit()
+    close_cursor(cursor)
+    conn.close()
+
+    response = client.get('/explore')
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert '<h1 class="h2 fw-bold mb-2">Explore</h1>' in html
+    assert 'Search all study materials' in html
+    assert 'Recently Added Materials' in html
+    assert 'Popular Study Materials' in html
+    assert 'Recently Viewed' in html
+    assert 'Explore fixture material' in html
+    assert 'Materials you preview in this browser will appear here.' in html
+    for path in (
+        '/notes', '/assignments', '/books', '/practicals',
+        '/question-papers', '/important-questions', '/syllabus', '/subjects',
+    ):
+        assert 'href="{}"'.format(path) in html
+    assert 'file_path' not in html
+
+    with client.session_transaction() as current:
+        current['guest_session_id'] = 'explore-session'
+    conn = get_connection()
+    cursor = get_cursor(conn)
+    cursor.execute(
+        "INSERT INTO guest_views (session_id, material_id, viewed_at) "
+        "VALUES (?, ?, ?)",
+        ('explore-session', material_id, '2025-01-05 12:00:00'),
+    )
+    conn.commit()
+    close_cursor(cursor)
+    conn.close()
+
+    recently_viewed = client.get('/explore')
+    recently_viewed_html = recently_viewed.get_data(as_text=True)
+    section = re.search(
+        r'<section[^>]*aria-labelledby="recently-viewed-title".*?</section>',
+        recently_viewed_html,
+        re.DOTALL,
+    )
+    assert recently_viewed.status_code == 200
+    assert section
+    assert 'Explore fixture material' in section.group(0)
+    assert 'href="/material/{}"'.format(material_id) in section.group(0)
+
+
+def test_mobile_bottom_navigation_has_five_items_and_profile_auth_actions(
+    feature_app,
+):
+    client = feature_app.test_client()
+    guest_html = client.get('/').get_data(as_text=True)
+    guest_nav = re.search(
+        r'<nav class="studyhub-bottom-nav".*?</nav>',
+        guest_html,
+        re.DOTALL,
+    )
+
+    assert guest_nav
+    nav_html = guest_nav.group(0)
+    assert len(re.findall(r'studyhub-bottom-nav__item(?=[ "\'])', nav_html)) == 5
+    for label in ('Home', 'Search', 'Explore', 'Notices', 'Profile'):
+        assert '>{}</span>'.format(label) in nav_html
+    assert 'far fa-compass' in nav_html
+    profile_menu = nav_html.split('data-studyhub-profile-menu', 1)[1]
+    assert 'href="/login"' in profile_menu
+    assert 'href="/register"' in profile_menu
+
+    with client.session_transaction() as current:
+        current['user_id'] = 1
+    signed_in_html = client.get('/').get_data(as_text=True)
+    signed_in_nav = re.search(
+        r'<nav class="studyhub-bottom-nav".*?</nav>',
+        signed_in_html,
+        re.DOTALL,
+    ).group(0)
+    signed_in_menu = signed_in_nav.split('data-studyhub-profile-menu', 1)[1]
+    for path in ('/profile', '/favorites', '/account/login-history', '/logout'):
+        assert 'href="{}"'.format(path) in signed_in_menu

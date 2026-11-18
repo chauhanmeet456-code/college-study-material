@@ -1,0 +1,106 @@
+:root {
+    --studyhub-skeleton-base: #e2e8f0;
+    --studyhub-skeleton-highlight: #f8fafc;
+}
+
+body.dark-mode {
+    --studyhub-skeleton-base: #334155;
+    --studyhub-skeleton-highlight: #475569;
+}
+
+.studyhub-skeleton {
+    display: block;
+    overflow: hidden;
+    border-radius: var(--radius, 0.5rem);
+    background-color: var(--studyhub-skeleton-base);
+    background-image: linear-gradient(
+        90deg,
+        var(--studyhub-skeleton-base) 25%,
+        var(--studyhub-skeleton-highlight) 50%,
+        var(--studyhub-skeleton-base) 75%
+    );
+    background-size: 200% 100%;
+    animation: studyhub-shimmer 1.35s ease-in-out infinite;
+}
+
+.studyhub-skeleton-line {
+    height: 0.8rem;
+    margin-bottom: 0.7rem;
+}
+
+.studyhub-skeleton-line:last-child {
+    margin-bottom: 0;
+}
+
+.studyhub-suggestion-skeleton {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border-color, #e2e8f0);
+}
+
+.studyhub-suggestion-skeleton .studyhub-skeleton-line:first-child {
+    width: 62%;
+}
+
+.studyhub-suggestion-skeleton .studyhub-skeleton-line:last-child {
+    width: 42%;
+}
+
+.studyhub-skeleton-card {
+    min-height: 100%;
+    overflow: hidden;
+}
+
+.studyhub-skeleton-card .studyhub-skeleton-media {
+    height: 160px;
+    border-radius: 0;
+}
+
+.studyhub-skeleton-card .studyhub-skeleton-body {
+    padding: 1rem;
+}
+
+.studyhub-skeleton-card .studyhub-skeleton-title {
+    width: 76%;
+    height: 1.2rem;
+    margin-bottom: 1rem;
+}
+
+.studyhub-skeleton-card .studyhub-skeleton-copy {
+    height: 0.75rem;
+    margin-bottom: 0.6rem;
+}
+
+.studyhub-skeleton-card .studyhub-skeleton-copy:last-of-type {
+    width: 68%;
+}
+
+.studyhub-skeleton-card .studyhub-skeleton-footer {
+    width: 100%;
+    height: 2rem;
+    margin-top: 1.4rem;
+}
+
+.studyhub-skeleton-notification {
+    padding: 0.9rem 1rem;
+    border-bottom: 1px solid var(--border-color, #e2e8f0);
+}
+
+.studyhub-skeleton-notification .studyhub-skeleton-line:first-child {
+    width: 58%;
+}
+
+.studyhub-skeleton-notification .studyhub-skeleton-line:last-child {
+    width: 88%;
+}
+
+@keyframes studyhub-shimmer {
+    from { background-position: -100% 0; }
+    to { background-position: 100% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .studyhub-skeleton {
+        animation: none;
+        background-image: none;
+    }
+}

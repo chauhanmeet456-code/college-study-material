@@ -7,7 +7,10 @@
             <div class="card">
                 <div class="card-header fw-semibold"><i class="fas fa-filter me-2"></i>Filters</div>
                 <div class="card-body">
-                    <form method="GET" action="{{ url_for('main.search') }}">
+                    <form method="GET" action="{{ url_for('main.search') }}"
+                          data-studyhub-ajax-search
+                          data-api-url="{{ url_for('main.api_search') }}"
+                          data-material-url-template="{{ url_for('main.material_details', material_id=0) }}">
                         {% if query %}<input type="hidden" name="q" value="{{ query }}">{% endif %}
                         <div class="mb-3">
                             <label class="form-label small fw-semibold">Subject</label>
@@ -58,13 +61,14 @@
                 <div>
                     <h1 class="h2 fw-bold mb-0">Search Results</h1>
                     {% if query %}
-                        <p class="text-muted mb-0">Results for "<strong>{{ query }}</strong>" - {{ total }} found</p>
+                        <p class="text-muted mb-0" id="searchResultSummary">Results for "<strong>{{ query }}</strong>" - {{ total }} found</p>
                     {% else %}
-                        <p class="text-muted mb-0">Showing all materials - {{ total }} found</p>
+                        <p class="text-muted mb-0" id="searchResultSummary">Showing all materials - {{ total }} found</p>
                     {% endif %}
                 </div>
             </div>
-            <div class="row g-3">
+            <div id="searchResultsStatus" class="visually-hidden" role="status" aria-live="polite"></div>
+            <div class="row g-3" id="searchResultGrid" aria-busy="false">
                 {% if materials %}
                     {% for material in materials %}
                         <div class="col-md-6 col-lg-4">

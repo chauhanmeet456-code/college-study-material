@@ -38,9 +38,11 @@
     <link rel="icon" type="image/svg+xml" href="{{ static_asset_url('favicons/favicon.svg') }}">
     {% endblock %}
     <link rel="stylesheet" href="{{ static_asset_url('css/cookie-consent.css') }}">
+    <link rel="stylesheet" href="{{ static_asset_url('css/skeleton.css') }}">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ static_asset_url('css/studyhub-shell.css') }}">
     {% block extra_css %}{% endblock %}
     <style>
         :root {
@@ -395,9 +397,26 @@
           footer .row > div { margin-bottom: 1.5rem; }
           footer .row > div:last-child { margin-bottom: 0; }
         }
+        @media (min-width: 992px) and (max-width: 1215.98px) {
+          .navbar.navbar-expand-lg .navbar-toggler { display: block; }
+          .navbar.navbar-expand-lg .navbar-collapse:not(.show):not(.collapsing) {
+            display: none !important;
+          }
+          .navbar.navbar-expand-lg .navbar-collapse.show,
+          .navbar.navbar-expand-lg .navbar-collapse.collapsing {
+            flex-basis: 100%;
+          }
+          .navbar.navbar-expand-lg .navbar-collapse.show {
+            align-items: stretch;
+            display: flex !important;
+            flex-direction: column;
+          }
+          .navbar.navbar-expand-lg .navbar-nav { flex-direction: column; }
+        }
     </style>
 </head>
-<body data-preferences-enabled="{{ 'true' if cookie_preferences and cookie_preferences.preferences else 'false' }}"
+<body class="{% if request.blueprint != 'admin' %}has-mobile-bottom-nav{% endif %}"
+      data-preferences-enabled="{{ 'true' if cookie_preferences and cookie_preferences.preferences else 'false' }}"
       data-cookie-consent-url="{{ url_for('main.save_cookie_consent') }}">
     {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
@@ -460,9 +479,7 @@
                                     <strong>Notifications</strong>
                                     <button class="btn btn-sm btn-link" id="markAllNotificationsRead" type="button">Mark all read</button>
                                 </div>
-                                <div id="notificationList" aria-live="polite">
-                                    <p class="text-muted small p-3 mb-0">Loading notifications...</p>
-                                </div>
+                                <div id="notificationList" aria-live="polite" aria-busy="false"></div>
                                 <p class="text-danger small px-3 mb-2" id="notificationStatus" role="status" aria-live="polite"></p>
                                 <a class="dropdown-item text-center border-top py-2" href="{{ url_for('user.notifications_page') }}">View notification history</a>
                             </div>
@@ -479,7 +496,7 @@
                             </ul>
                         </div>
                     {% else %}
-                        <a href="{{ url_for('auth.login') }}" class="btn btn-outline-primary">Login</a>
+                        <a href="{{ url_for('auth.login') }}" class="btn btn-outline-primary d-none d-lg-inline-flex">Login</a>
                     {% endif %}
                 </div>
             </div>
@@ -536,6 +553,70 @@
             </div>
         </div>
     </footer>
+
+    {% if request.blueprint != 'admin' %}
+    <nav class="studyhub-bottom-nav" aria-label="Mobile navigation" data-studyhub-bottom-nav>
+        <a class="studyhub-bottom-nav__item{% if request.endpoint == 'main.index' %} is-active{% endif %}"
+           href="{{ url_for('main.index') }}"
+           {% if request.endpoint == 'main.index' %}aria-current="page"{% endif %}>
+            <i class="fas fa-house" aria-hidden="true"></i>
+            <span>Home</span>
+        </a>
+        <a class="studyhub-bottom-nav__item{% if request.endpoint == 'main.search' %} is-active{% endif %}"
+           href="{{ url_for('main.search') }}"
+           {% if request.endpoint == 'main.search' %}aria-current="page"{% endif %}>
+            <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+            <span>Search</span>
+        </a>
+        <a class="studyhub-bottom-nav__item studyhub-bottom-nav__item--explore{% if request.endpoint == 'main.explore' %} is-active{% endif %}"
+           href="{{ url_for('main.explore') }}"
+           {% if request.endpoint == 'main.explore' %}aria-current="page"{% endif %}>
+            <span class="studyhub-bottom-nav__explore-icon">
+                <i class="far fa-compass" aria-hidden="true"></i>
+            </span>
+            <span>Explore</span>
+        </a>
+        <a class="studyhub-bottom-nav__item{% if request.endpoint == 'user.notifications_page' %} is-active{% endif %}"
+           href="{{ url_for('user.notifications_page') }}"
+           {% if request.endpoint == 'user.notifications_page' %}aria-current="page"{% endif %}>
+            <i class="far fa-bell" aria-hidden="true"></i>
+            <span>Notices</span>
+        </a>
+        <div class="dropdown dropup studyhub-bottom-nav__profile">
+            <button class="studyhub-bottom-nav__item{% if request.blueprint == 'user' or request.endpoint in ('auth.login', 'auth.register') %} is-active{% endif %}"
+                    type="button" data-bs-toggle="dropdown" aria-expanded="false"
+                    aria-label="Profile menu">
+                <i class="far fa-user" aria-hidden="true"></i>
+                <span>Profile</span>
+            </button>
+            <div class="dropdown-menu dropdown-menu-end studyhub-profile-menu"
+                 data-studyhub-profile-menu>
+                {% if current_user %}
+                    <a class="dropdown-item" href="{{ url_for('user.profile') }}">
+                        <i class="fas fa-user me-2" aria-hidden="true"></i>My Profile
+                    </a>
+                    <a class="dropdown-item" href="{{ url_for('user.favorites') }}">
+                        <i class="fas fa-heart me-2" aria-hidden="true"></i>My Favorites
+                    </a>
+                    <a class="dropdown-item" href="{{ url_for('user.login_history') }}">
+                        <i class="fas fa-shield-halved me-2" aria-hidden="true"></i>Login History
+                    </a>
+                    <hr class="dropdown-divider">
+                    <a class="dropdown-item text-danger" href="{{ url_for('auth.logout') }}">
+                        <i class="fas fa-right-from-bracket me-2" aria-hidden="true"></i>Logout
+                    </a>
+                {% else %}
+                    <a class="dropdown-item" href="{{ url_for('auth.login') }}">
+                        <i class="fas fa-right-to-bracket me-2" aria-hidden="true"></i>Login
+                    </a>
+                    <a class="dropdown-item" href="{{ url_for('auth.register') }}">
+                        <i class="fas fa-user-plus me-2" aria-hidden="true"></i>Register
+                    </a>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+    {% endif %}
 
     {% include "partials/cookie_consent.html" %}
 

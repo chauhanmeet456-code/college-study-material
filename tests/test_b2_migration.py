@@ -578,6 +578,7 @@ def test_production_database_requires_exact_explicit_confirmation(
     assert migration._PRODUCTION_CONNECT_OPTIONS == {
         'sslmode': 'verify-full',
         'sslrootcert': str(ca_bundle),
+        'connect_timeout': 30,
     }
     assert Config.DATABASE_URL == 'postgresql://dev@localhost/devdb'
     assert Config.USE_POSTGRES is True
@@ -628,6 +629,7 @@ def test_migration_production_connection_uses_confirmed_production_url(
     assert connect_options == {
         'sslmode': 'verify-full',
         'sslrootcert': str(ca_bundle),
+        'connect_timeout': 30,
     }
     assert Config.DATABASE_URL == development_url
 

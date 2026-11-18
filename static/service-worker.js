@@ -1,6 +1,6 @@
 'use strict';
 
-const STATIC_CACHE = 'studyhub-static-v1';
+const STATIC_CACHE = 'studyhub-static-v3';
 const PRECACHE_URLS = [
   '/static/offline.html',
   '/static/css/cookie-consent.css',
@@ -29,6 +29,7 @@ function isPublicNavigation(url) {
     '/important-questions',
     '/syllabus',
     '/search',
+    '/explore',
     '/about',
     '/contact',
     '/cookie-policy',
@@ -67,7 +68,9 @@ self.addEventListener('fetch', event => {
   if (isCacheableStatic(url)) {
     event.respondWith((async () => {
       const cache = await caches.open(STATIC_CACHE);
-      const cacheKey = url.origin + url.pathname;
+      const version = url.searchParams.get('v');
+      const cacheKey = url.origin + url.pathname
+        + (version ? '?v=' + encodeURIComponent(version) : '');
       const cached = await cache.match(cacheKey);
       const update = fetch(request).then(response => {
         const cacheControl = response.headers.get('Cache-Control') || '';

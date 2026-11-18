@@ -16,6 +16,7 @@ from flask import (
     redirect,
     render_template,
     request,
+    session,
     send_from_directory,
     url_for,
 )
@@ -712,6 +713,7 @@ def sitemap_xml():
 
     public_endpoints = (
         'main.index',
+        'main.explore',
         'main.subjects',
         'main.notes_page',
         'main.assignments_page',
@@ -771,6 +773,25 @@ def service_worker():
     )
     response.headers['Service-Worker-Allowed'] = '/'
     return response
+
+
+@main_bp.route('/explore')
+def explore():
+    return render_template(
+        'explore.html',
+        current_user=get_current_user(),
+        latest_materials=Material.get_latest(limit=6),
+        popular_materials=Material.get_popular(limit=6),
+        recently_viewed=Material.get_recently_viewed(
+            session.get('guest_session_id'),
+            limit=6,
+        ),
+        meta_title='Explore Study Materials - StudyHub',
+        meta_description=(
+            'Search and explore StudyHub notes, assignments, books, '
+            'practicals, question papers, and subjects.'
+        ),
+    )
 
 
 @main_bp.route('/notes')

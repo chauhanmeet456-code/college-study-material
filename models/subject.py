@@ -58,6 +58,25 @@ class Subject:
             conn.close()
 
     @staticmethod
+    def get_homepage_list(limit=6):
+        conn = get_connection()
+        cursor = None
+        try:
+            cursor = get_cursor(conn)
+            cursor.execute(
+                "SELECT id, name, code, "
+                "(SELECT COUNT(*) FROM subjects WHERE is_active = 1) "
+                "AS total_subjects "
+                "FROM subjects WHERE is_active = 1 "
+                "ORDER BY name ASC LIMIT ?",
+                (limit,),
+            )
+            return cursor.fetchall()
+        finally:
+            close_cursor(cursor)
+            conn.close()
+
+    @staticmethod
     def get_all_with_material_counts():
         conn = get_connection()
         cursor = None
