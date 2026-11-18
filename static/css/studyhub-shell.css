@@ -168,6 +168,10 @@
 }
 
 @media (max-width: 991.98px) {
+    .navbar .studyhub-header-account {
+        display: none !important;
+    }
+
     body.has-mobile-bottom-nav {
         padding-bottom: calc(102px + env(safe-area-inset-bottom));
     }
@@ -267,6 +271,32 @@
 
     .studyhub-bottom-nav__profile > button {
         width: 100%;
+    }
+
+    .studyhub-bottom-nav__profile-avatar {
+        align-items: center;
+        border: 2px solid transparent;
+        border-radius: 50%;
+        display: inline-flex;
+        flex: 0 0 28px;
+        height: 28px;
+        justify-content: center;
+        overflow: hidden;
+        width: 28px;
+    }
+
+    .studyhub-bottom-nav__profile-avatar.is-active {
+        border-color: #4f8dff;
+    }
+
+    .studyhub-bottom-nav__profile-avatar > img {
+        height: 100%;
+        object-fit: cover;
+        width: 100%;
+    }
+
+    .studyhub-bottom-nav__profile-avatar > i {
+        font-size: 1.1rem;
     }
 
     .studyhub-profile-menu {

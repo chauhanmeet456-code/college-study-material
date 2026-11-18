@@ -1625,3 +1625,95 @@ def test_mobile_bottom_navigation_has_five_items_and_profile_auth_actions(
     signed_in_menu = signed_in_nav.split('data-studyhub-profile-menu', 1)[1]
     for path in ('/profile', '/favorites', '/account/login-history', '/logout'):
         assert 'href="{}"'.format(path) in signed_in_menu
+
+
+def test_bottom_navigation_profile_avatar_uses_current_user_image(feature_app):
+    client = feature_app.test_client()
+
+    guest_html = client.get('/').get_data(as_text=True)
+    guest_nav = re.search(
+        r'<nav class="studyhub-bottom-nav".*?</nav>',
+        guest_html,
+        re.DOTALL,
+    ).group(0)
+    assert 'studyhub-bottom-nav__profile-avatar' in guest_nav
+    assert 'far fa-user' in guest_nav
+    assert 'studyhub-bottom-nav__profile-avatar is-active' not in guest_nav
+
+    with client.session_transaction() as current:
+        current['user_id'] = 1
+    signed_in_html = client.get('/').get_data(as_text=True)
+    signed_in_nav = re.search(
+        r'<nav class="studyhub-bottom-nav".*?</nav>',
+        signed_in_html,
+        re.DOTALL,
+    ).group(0)
+    assert 'far fa-user' in signed_in_nav
+
+    conn = get_connection()
+    cursor = get_cursor(conn)
+    cursor.execute(
+        "UPDATE users SET profile_image = ? WHERE id = ?",
+        ('profiles/studyhub-avatar.png', 1),
+    )
+    conn.commit()
+    close_cursor(cursor)
+    conn.close()
+
+    photo_html = client.get('/').get_data(as_text=True)
+    photo_nav = re.search(
+        r'<nav class="studyhub-bottom-nav".*?</nav>',
+        photo_html,
+        re.DOTALL,
+    ).group(0)
+    assert re.search(
+        r'<img src="/static/uploads/profiles/studyhub-avatar\.png"\s+'
+        r'alt="" aria-hidden="true">',
+        photo_nav,
+    )
+    assert 'studyhub-bottom-nav__profile-avatar is-active' not in photo_nav
+
+    profile_html = client.get('/profile').get_data(as_text=True)
+    profile_nav = re.search(
+        r'<nav class="studyhub-bottom-nav".*?</nav>',
+        profile_html,
+        re.DOTALL,
+    ).group(0)
+    assert 'studyhub-bottom-nav__profile-avatar is-active' in profile_nav
+    assert 'src="/static/uploads/profiles/studyhub-avatar.png"' in profile_nav
+
+    conn = get_connection()
+    cursor = get_cursor(conn)
+    cursor.execute("UPDATE users SET profile_image = NULL WHERE id = ?", (1,))
+    conn.commit()
+    close_cursor(cursor)
+    conn.close()
+
+    removed_photo_html = client.get('/profile').get_data(as_text=True)
+    removed_photo_nav = re.search(
+        r'<nav class="studyhub-bottom-nav".*?</nav>',
+        removed_photo_html,
+        re.DOTALL,
+    ).group(0)
+    assert 'far fa-user' in removed_photo_nav
+    assert 'studyhub-avatar.png' not in removed_photo_nav
+    assert 'studyhub-bottom-nav__profile-avatar is-active' in removed_photo_nav
+
+
+def test_mobile_header_account_controls_remain_desktop_only(feature_app):
+    client = feature_app.test_client()
+    with client.session_transaction() as current:
+        current['user_id'] = 1
+    html = client.get('/').get_data(as_text=True)
+
+    assert 'class="dropdown studyhub-header-account" id="notificationWidget"' in html
+    assert 'class="dropdown studyhub-header-account"' in html
+    stylesheet = open(
+        'static/css/studyhub-shell.css',
+        encoding='utf-8',
+    ).read()
+    mobile_rules = stylesheet.split('@media (max-width: 991.98px)', 1)[1]
+    assert '.navbar .studyhub-header-account' in mobile_rules
+    assert 'display: none !important;' in mobile_rules
+    assert '.studyhub-bottom-nav__profile-avatar > img' in mobile_rules
+    assert 'object-fit: cover;' in mobile_rules
