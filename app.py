@@ -1,7 +1,10 @@
 import logging
 import hashlib
+import json
 import os
 import time
+import uuid
+import re
 from datetime import datetime, timedelta
 from functools import lru_cache
 
@@ -11,11 +14,14 @@ _app_logger = logging.getLogger('studyhub.app')
 from flask import (
     Flask,
     current_app,
+    before_render_template,
     flash,
     g,
+    has_request_context,
     redirect,
     request,
     session,
+    template_rendered,
     url_for,
 )
 from markupsafe import Markup
@@ -68,6 +74,7 @@ SKIP_SESSION_CHECK_ENDPOINTS = {
     'user.revoke_all_sessions',
     'user.session_status',
     'main.index',
+    'main.health_check',
     'main.favicon',
     'main.privacy_policy',
     'main.terms_of_service',
@@ -161,15 +168,80 @@ def create_app():
     @app.before_request
     def log_request_time():
         request._start_time = time.time()
+        g.template_timings = {}
+        g.template_render_stack = []
+        incoming_id = request.headers.get('X-Request-ID', '')
+        g.request_id = (
+            incoming_id
+            if re.fullmatch(r'[A-Za-z0-9._-]{1,64}', incoming_id)
+            else uuid.uuid4().hex
+        )
+
+    @before_render_template.connect_via(app, weak=False)
+    def start_template_timing(sender, template, context, **extra):
+        if has_request_context():
+            stack = getattr(g, 'template_render_stack', None)
+            if stack is None:
+                stack = []
+                g.template_render_stack = stack
+            stack.append(
+                (template.name, time.perf_counter())
+            )
+
+    @template_rendered.connect_via(app, weak=False)
+    def finish_template_timing(sender, template, context, **extra):
+        if not has_request_context():
+            return
+        stack = getattr(g, 'template_render_stack', [])
+        if not stack:
+            return
+        template_name, started = stack.pop()
+        timings = getattr(g, 'template_timings', None)
+        if timings is None:
+            timings = {}
+            g.template_timings = timings
+        timings[template_name] = timings.get(template_name, 0.0) + (
+            time.perf_counter() - started
+        ) * 1000
 
     @app.after_request
     def log_request_duration(response):
         start = getattr(request, '_start_time', None)
+        response.headers.setdefault(
+            'X-Request-ID', getattr(g, 'request_id', uuid.uuid4().hex)
+        )
         if start is not None:
-            duration = time.time() - start
-            endpoint = request.endpoint or 'unknown'
-            if duration > 1.0:
-                print(f'[TIMING] {request.method} {endpoint} - {duration:.3f}s', flush=True)
+            duration_ms = (time.time() - start) * 1000
+            metrics = getattr(g, 'database_metrics', {})
+            if duration_ms >= 1000:
+                _app_logger.warning(
+                    'slow_request request_id=%s method=%s endpoint=%s status=%s '
+                    'duration_ms=%.1f db_acquires=%s db_acquire_ms=%.1f '
+                    'db_queries=%s db_execute_ms=%.1f db_fetches=%s '
+                    'db_fetch_ms=%.1f db_query_ms=%.1f db_slowest_ms=%.1f '
+                    'db_slowest_operation=%s db_slowest_query=%s '
+                    'template_timings=%s storage_timings=%s '
+                    'response_bytes=%s homepage_timings=%s',
+                    getattr(g, 'request_id', 'unknown'),
+                    request.method,
+                    request.endpoint or 'unknown',
+                    response.status_code,
+                    duration_ms,
+                    metrics.get('acquire_count', 0),
+                    metrics.get('acquire_ms', 0.0),
+                    metrics.get('query_count', 0),
+                    metrics.get('execute_ms', 0.0),
+                    metrics.get('fetch_count', 0),
+                    metrics.get('fetch_ms', 0.0),
+                    metrics.get('query_ms', 0.0),
+                    metrics.get('slowest_query_ms', 0.0),
+                    metrics.get('slowest_operation', 'none'),
+                    metrics.get('slowest_query', 'none'),
+                    json.dumps(getattr(g, 'template_timings', {}), sort_keys=True),
+                    json.dumps(getattr(g, 'storage_timings', {}), sort_keys=True),
+                    response.content_length,
+                    json.dumps(getattr(g, 'homepage_timings', {}), sort_keys=True),
+                )
         return response
 
     @app.after_request

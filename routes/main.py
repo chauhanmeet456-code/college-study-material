@@ -2,6 +2,7 @@ import logging
 import mimetypes
 import os
 import re
+import time
 import urllib.parse
 import xml.etree.ElementTree as ET
 from datetime import date, datetime
@@ -268,16 +269,41 @@ def api_search():
     
     materials, total = Material.get_all(filters=filters, sort=sort, page=page, per_page=12)
     has_more = total > page * 12
+    public_materials = [
+        {
+            key: material.get(key)
+            for key in (
+                'id', 'title', 'description', 'view_count', 'download_count',
+                'subject_name', 'subject_code', 'category_name',
+            )
+        }
+        for material in materials
+    ]
     
     return jsonify({
-        'materials': materials,
+        'materials': public_materials,
         'total': total,
         'has_more': has_more,
         'page': page
     })
 
-@main_bp.route('/')
+@main_bp.route('/', methods=['GET', 'HEAD'])
 def index():
+    if request.method == 'HEAD':
+        return current_app.response_class('', mimetype='text/html')
+
+    homepage_timings = {}
+    g.homepage_timings = homepage_timings
+
+    def timed_home_query(name, callback, fallback):
+        started = time.perf_counter()
+        try:
+            return optional_home_query(name, callback, fallback)
+        finally:
+            homepage_timings[name] = (
+                time.perf_counter() - started
+            ) * 1000
+
     database_connection_unavailable = False
 
     def optional_home_query(name, callback, fallback):
@@ -299,22 +325,22 @@ def index():
             )
             return fallback
 
-    announcements = optional_home_query(
-        'announcements', lambda: Announcement.get_all_active(limit=5), []
+    announcements = timed_home_query(
+        'announcements', lambda: Announcement.get_all_active(limit=1), []
     )
-    subjects = optional_home_query(
-        'subjects', lambda: Subject.get_all(active_only=True), []
+    subjects = timed_home_query(
+        'subjects', lambda: Subject.get_homepage_list(limit=6), []
     )
-    latest_materials = optional_home_query(
+    latest_materials = timed_home_query(
         'latest materials', lambda: Material.get_latest(limit=6), []
     )
-    featured_materials = optional_home_query(
+    featured_materials = timed_home_query(
         'featured materials', lambda: Material.get_featured(limit=6), []
     )
     total_materials = 0
     total_notes = 0
     total_students = 0
-    total_subjects = len(subjects)
+    total_subjects = subjects[0].get('total_subjects', 0) if subjects else 0
 
     def get_homepage_counts():
         conn = None
@@ -334,21 +360,50 @@ def index():
             if conn:
                 conn.close()
 
-    counts = optional_home_query('counts', get_homepage_counts, {})
+    counts = timed_home_query('counts', get_homepage_counts, {})
     total_materials = counts.get('total_materials') or 0
     total_notes = counts.get('total_notes') or 0
     total_students = counts.get('total_students') or 0
-    return render_template('index.html', subjects=subjects, latest_materials=latest_materials,
-                           featured_materials=featured_materials, announcements=announcements,
-                           total_subjects=total_subjects, total_materials=total_materials,
-                           total_notes=total_notes, total_students=total_students,
-                           current_user=get_current_user(),
-                           meta_title='StudyHub - College Study Materials, Notes & Resources',
-                           meta_description=(
-                               'Access college study materials, notes, assignments, '
-                               'books, practicals and question papers in one place '
-                               'with StudyHub.'
-                           ))
+    user_lookup_started = time.perf_counter()
+    current_user = get_current_user()
+    homepage_timings['user_session_lookup'] = (
+        time.perf_counter() - user_lookup_started
+    ) * 1000
+    context_started = time.perf_counter()
+    template_context = {
+        'subjects': subjects,
+        'latest_materials': latest_materials,
+        'featured_materials': featured_materials,
+        'announcements': announcements,
+        'total_subjects': total_subjects,
+        'total_materials': total_materials,
+        'total_notes': total_notes,
+        'total_students': total_students,
+        'current_user': current_user,
+        'meta_title': 'StudyHub - College Study Materials, Notes & Resources',
+        'meta_description': (
+            'Access college study materials, notes, assignments, books, '
+            'practicals and question papers in one place with StudyHub.'
+        ),
+    }
+    homepage_timings['context_generation'] = (
+        time.perf_counter() - context_started
+    ) * 1000
+    render_started = time.perf_counter()
+    response = render_template('index.html', **template_context)
+    homepage_timings['template_rendering'] = (
+        time.perf_counter() - render_started
+    ) * 1000
+    homepage_timings['total_before_response'] = sum(homepage_timings.values())
+    return response
+
+
+@main_bp.route('/healthz')
+def health_check():
+    return current_app.response_class(
+        '{"status":"ok"}\n',
+        mimetype='application/json',
+    )
 
 @main_bp.route('/subjects')
 def subjects():
@@ -392,7 +447,12 @@ def material_details(material_id):
     material = Material.get_by_id(material_id)
     if not material or not material.get('is_active', 1):
         abort(404)
-    if not GuestActivity.can_view_material():
+    current_user = get_current_user()
+    guest_view_count = GuestActivity.get_view_count()
+    if (
+        guest_view_count is not None
+        and guest_view_count >= Config.GUEST_VIEW_LIMIT
+    ):
         flash('You have reached the free preview limit. Please register or login to continue viewing materials.', 'warning')
         return redirect(url_for('auth.login'))
     material['view_count'] = material.get('view_count', 0)
@@ -401,9 +461,8 @@ def material_details(material_id):
     remaining_views = None
     remaining_downloads = None
     is_favorited = False
-    current_user = get_current_user()
-    if not current_user:
-        remaining_views = max(0, Config.GUEST_VIEW_LIMIT - GuestActivity.get_view_count())
+    if guest_view_count is not None:
+        remaining_views = max(0, Config.GUEST_VIEW_LIMIT - guest_view_count)
         remaining_downloads = max(0, Config.GUEST_DOWNLOAD_LIMIT - GuestActivity.get_download_count())
     else:
         from models.material import Favorite
@@ -427,15 +486,22 @@ def view_material(material_id):
     material = Material.get_by_id(material_id)
     if not material or not material.get('is_active', 1):
         abort(404)
-    if not GuestActivity.can_view_material():
+    current_user = get_current_user()
+    guest_view_count = GuestActivity.get_view_count()
+    if (
+        guest_view_count is not None
+        and guest_view_count >= Config.GUEST_VIEW_LIMIT
+    ):
         flash('You have reached the free preview limit. Please register or login to continue viewing materials.', 'warning')
         return redirect(url_for('auth.login'))
     Material.increment_view(material_id)
     GuestActivity.record_view(material_id)
     subject = Subject.get_by_id(material['subject_id'])
     remaining_views = None
-    if not get_current_user():
-        remaining_views = max(0, Config.GUEST_VIEW_LIMIT - GuestActivity.get_view_count())
+    if guest_view_count is not None:
+        remaining_views = max(
+            0, Config.GUEST_VIEW_LIMIT - guest_view_count - 1
+        )
     from utils.helpers import is_video_file
     is_video = is_video_file(material.get('file_name', ''))
 
@@ -447,7 +513,7 @@ def view_material(material_id):
         'pdf_viewer.html',
         material=material,
         subject=subject,
-        current_user=get_current_user(),
+        current_user=current_user,
         remaining_views=remaining_views,
         is_video=is_video,
         rel_path=rel_path,

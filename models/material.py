@@ -136,7 +136,11 @@ class Material:
         try:
             cursor = get_cursor(conn)
             cursor.execute("""
-                SELECT m.*, s.name as subject_name, s.code as subject_code, c.name as category_name
+                SELECT m.id, m.title,
+                       COALESCE(SUBSTR(m.description, 1, 81), '') AS description,
+                       m.view_count, m.download_count,
+                       s.name AS subject_name, s.code AS subject_code,
+                       c.name AS category_name
                 FROM materials m
                 JOIN subjects s ON m.subject_id = s.id
                 JOIN categories c ON m.category_id = c.id
@@ -156,7 +160,11 @@ class Material:
         try:
             cursor = get_cursor(conn)
             cursor.execute("""
-                SELECT m.*, s.name as subject_name, s.code as subject_code, c.name as category_name
+                SELECT m.id, m.title,
+                       COALESCE(SUBSTR(m.description, 1, 81), '') AS description,
+                       m.view_count, m.download_count,
+                       s.name AS subject_name, s.code AS subject_code,
+                       c.name AS category_name
                 FROM materials m
                 JOIN subjects s ON m.subject_id = s.id
                 JOIN categories c ON m.category_id = c.id
@@ -446,6 +454,21 @@ class Favorite:
             cursor.execute("SELECT COUNT(*) as total FROM favorites WHERE user_id = ?", (user_id,))
             total = cursor.fetchone()['total']
             return materials, total
+        finally:
+            close_cursor(cursor)
+            conn.close()
+
+    @staticmethod
+    def count_by_user(user_id):
+        conn = get_connection()
+        cursor = None
+        try:
+            cursor = get_cursor(conn)
+            cursor.execute(
+                "SELECT COUNT(*) as total FROM favorites WHERE user_id = ?",
+                (user_id,),
+            )
+            return cursor.fetchone()['total']
         finally:
             close_cursor(cursor)
             conn.close()

@@ -1,6 +1,8 @@
 import sqlite3
 import json
+import logging
 import re
+import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -40,7 +42,11 @@ def feature_app(tmp_path_factory):
             id INTEGER PRIMARY KEY, name TEXT, email TEXT UNIQUE, password_hash TEXT,
             profile_image TEXT, is_active INTEGER DEFAULT 1,
             deleted_by_user INTEGER DEFAULT 0, created_at DATETIME,
-            last_login DATETIME
+            last_login DATETIME, deletion_processed DATETIME
+        );
+        CREATE TABLE favorites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER,
+            material_id INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE user_sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER,
@@ -81,7 +87,9 @@ def feature_app(tmp_path_factory):
             uploaded_by INTEGER, is_featured INTEGER DEFAULT 0,
             uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            is_active INTEGER DEFAULT 1
+            is_active INTEGER DEFAULT 1,
+            view_count INTEGER DEFAULT 0,
+            download_count INTEGER DEFAULT 0
         );
         CREATE TABLE settings (
             id INTEGER PRIMARY KEY, key TEXT UNIQUE, value TEXT,
@@ -106,6 +114,11 @@ def feature_app(tmp_path_factory):
 
     app = create_app()
     app.config.update(TESTING=True)
+    app.add_url_rule(
+        '/_performance-log-test',
+        endpoint='_performance_log_test',
+        view_func=_slow_template_response,
+    )
     yield app
 
     for key, value in original.items():
@@ -132,6 +145,17 @@ def test_suggestions_return_typed_links_and_reject_invalid_queries(feature_app):
     assert {'title': 'Mathematics', 'type': 'Subject', 'url': '/subject/1'} not in suggestions
     assert client.get('/api/search/suggestions?q=%00').status_code == 400
     assert client.get('/api/search/suggestions?q=' + ('a' * 101)).status_code == 400
+
+
+def test_search_api_exposes_only_public_card_fields(feature_app):
+    response = feature_app.test_client().get('/api/search?q=algebra')
+
+    assert response.status_code == 200
+    result = response.get_json()['materials'][0]
+    assert result['title'] == '100% Algebra Notes'
+    assert 'file_path' not in result
+    assert 'file_name' not in result
+    assert 'uploaded_by' not in result
 
 
 def test_notification_persistence_deduplication_and_private_reads(feature_app):
@@ -397,6 +421,7 @@ def test_homepage_autocomplete_is_only_on_hero_and_uses_active_suggestions(featu
     page = client.get('/')
     assert page.status_code == 200
     html = page.get_data(as_text=True)
+    assert '100% Algebra Notes' in html
     assert 'id="heroSearchInput"' in html
     assert 'id="heroSearchSuggestions"' in html
     assert 'id="navbarSearchInput"' not in html
@@ -421,6 +446,91 @@ def test_homepage_autocomplete_is_only_on_hero_and_uses_active_suggestions(featu
     assert next(item for item in suggestions if item['title'] == '100% Algebra Notes')[
         'subtitle'
     ] == 'Mathematics'
+
+
+def test_head_homepage_skips_database_and_matches_get_headers(
+    feature_app, monkeypatch,
+):
+    def unexpected_database_access(*_args, **_kwargs):
+        raise AssertionError('HEAD / must not access the database')
+
+    monkeypatch.setattr('routes.main.get_connection', unexpected_database_access)
+    monkeypatch.setattr('routes.main.get_current_user', unexpected_database_access)
+    response = feature_app.test_client().head(
+        '/',
+        headers={'X-Request-ID': 'head-check-123'},
+    )
+
+    assert response.status_code == 200
+    assert response.mimetype == 'text/html'
+    assert response.data == b''
+    assert response.headers['Cache-Control'] == 'private, no-store'
+    assert response.headers['X-Request-ID'] == 'head-check-123'
+
+
+def test_health_endpoint_is_lightweight_and_crawlers_get_same_metadata(
+    feature_app, monkeypatch,
+):
+    feature_app.config['PUBLIC_BASE_URL'] = (
+        'https://college-study-material.onrender.com'
+    )
+
+    def unexpected_database_access(*_args, **_kwargs):
+        raise AssertionError('The health endpoint must not access the database')
+
+    monkeypatch.setattr('routes.main.get_connection', unexpected_database_access)
+    client = feature_app.test_client()
+    health = client.get('/healthz')
+    assert health.status_code == 200
+    assert health.get_json() == {'status': 'ok'}
+
+    monkeypatch.undo()
+    responses = [
+        client.get('/', headers={'User-Agent': user_agent})
+        for user_agent in (
+            'WhatsApp',
+            'facebookexternalhit/1.1',
+            'OpenGraphBot',
+        )
+    ]
+    assert all(response.status_code == 200 for response in responses)
+    metadata = [
+        {
+            item.get('property') or item.get('name'): item.get('content')
+            for item in _metadata(response)
+            if item.get('property', '').startswith('og:')
+            or item.get('name') == 'twitter:card'
+        }
+        for response in responses
+    ]
+    assert metadata[0] == metadata[1] == metadata[2]
+
+
+def test_ajax_search_skeleton_is_responsive_and_respects_reduced_motion(
+    feature_app,
+):
+    from pathlib import Path
+
+    response = feature_app.test_client().get('/search?q=algebra')
+    assert response.status_code == 200
+    assert b'data-studyhub-ajax-search' in response.data
+    assert b'searchResultGrid' in response.data
+    assert b'studyhub-skeleton-card' not in response.data
+
+    stylesheet = (
+        Path(__file__).resolve().parents[1]
+        / 'static'
+        / 'css'
+        / 'skeleton.css'
+    ).read_text(encoding='utf-8')
+    assert 'prefers-reduced-motion: reduce' in stylesheet
+    assert 'studyhub-shimmer' in stylesheet
+    assert '@media' in stylesheet
+
+    procfile = (
+        Path(__file__).resolve().parents[1] / 'Procfile'
+    ).read_text(encoding='utf-8')
+    assert '--bind 0.0.0.0:${PORT' in procfile
 
 
 def test_subject_and_category_pages_render_with_combined_queries(feature_app):
@@ -654,7 +764,8 @@ def test_service_worker_manifest_and_safe_cache_headers(feature_app):
     assert worker.headers['Service-Worker-Allowed'] == '/'
     assert worker.headers['Cache-Control'] == 'no-cache'
     worker_source = worker.get_data(as_text=True)
-    assert "studyhub-static-v1" in worker_source
+    assert "studyhub-static-v2" in worker_source
+    assert "url.searchParams.get('v')" in worker_source
     assert "'/static/offline.html'" in worker_source
     assert "url.pathname.includes('/uploads/')" in worker_source
     assert client.get('/static/offline.html').status_code == 200
@@ -1250,3 +1361,124 @@ def test_authlib_rejects_mismatched_google_oauth_state(feature_app):
     callback = client.get('/google/callback?code=not-used&state=incorrect-state')
     assert callback.status_code == 302
     assert OAuthAccount.get_user_by_email('state-test@example.test') is None
+
+
+def test_profile_uses_count_only_favorite_query(feature_app, monkeypatch):
+    from models.material import Favorite
+    import routes.user as user_routes
+
+    conn = get_connection()
+    cursor = get_cursor(conn)
+    cursor.execute(
+        "INSERT INTO favorites (user_id, material_id) VALUES (?, ?)",
+        (1, 1),
+    )
+    conn.commit()
+    close_cursor(cursor)
+    conn.close()
+
+    def unexpected_favorite_list(*_args, **_kwargs):
+        pytest.fail('The profile must not load a favorite material card.')
+
+    monkeypatch.setattr(Favorite, 'get_by_user', unexpected_favorite_list)
+    monkeypatch.setattr(
+        user_routes,
+        'render_template',
+        lambda template, **context: context,
+    )
+    client = feature_app.test_client()
+    _session(client)
+
+    response = client.get('/profile')
+
+    assert response.status_code == 200
+    assert response.get_json()['user']['favorites_count'] == 1
+
+
+def test_deletion_request_badge_uses_count_only_query(feature_app):
+    from models.user import User
+
+    conn = get_connection()
+    cursor = get_cursor(conn)
+    cursor.execute(
+        "UPDATE users SET deleted_by_user = 1, deletion_processed = NULL "
+        "WHERE id = ?",
+        (2,),
+    )
+    conn.commit()
+    close_cursor(cursor)
+    conn.close()
+
+    assert User.get_deletion_requests_count() == 1
+
+
+def test_material_pages_reuse_guest_view_count(feature_app, monkeypatch):
+    import routes.main as main_routes
+
+    original_get_view_count = main_routes.GuestActivity.get_view_count
+    calls = []
+
+    def counted_view_count():
+        calls.append(True)
+        return original_get_view_count()
+
+    def unexpected_limit_query():
+        pytest.fail('The route should use the count it already fetched.')
+
+    monkeypatch.setattr(
+        main_routes.GuestActivity,
+        'get_view_count',
+        staticmethod(counted_view_count),
+    )
+    monkeypatch.setattr(
+        main_routes.GuestActivity,
+        'can_view_material',
+        staticmethod(unexpected_limit_query),
+    )
+    monkeypatch.setattr(
+        main_routes,
+        'render_template',
+        lambda template, **context: context,
+    )
+
+    detail = feature_app.test_client().get('/material/1')
+    assert detail.status_code == 200
+    assert detail.get_json()['remaining_views'] == Config.GUEST_VIEW_LIMIT
+    assert len(calls) == 1
+
+    calls.clear()
+    viewer = feature_app.test_client().get('/material/1/view')
+    assert viewer.status_code == 200
+    assert viewer.get_json()['remaining_views'] == Config.GUEST_VIEW_LIMIT - 1
+    assert len(calls) == 1
+
+
+def test_slow_request_log_includes_render_database_and_response_metrics(
+    feature_app, caplog,
+):
+    caplog.set_level(logging.WARNING, logger='studyhub.app')
+
+    response = feature_app.test_client().get('/_performance-log-test')
+
+    assert response.status_code == 200
+    slow_logs = [
+        record.getMessage()
+        for record in caplog.records
+        if 'slow_request' in record.getMessage()
+        and 'endpoint=_performance_log_test' in record.getMessage()
+    ]
+    assert len(slow_logs) == 1
+    log = slow_logs[0]
+    assert 'db_execute_ms=' in log
+    assert 'db_fetches=' in log
+    assert 'db_fetch_ms=' in log
+    assert 'template_timings=' in log
+    assert 'storage_timings=' in log
+    assert 'response_bytes=2' in log
+
+
+def _slow_template_response():
+    from flask import render_template_string
+
+    time.sleep(1.01)
+    return render_template_string('ok')

@@ -583,8 +583,7 @@ def users_list():
     status = request.args.get('status', 'all')
     page = positive_query_int('page')
     users, total = User.get_all(search=search, status=status, page=page, per_page=10)
-    deletion_requests = User.get_deletion_requests()
-    deletion_count = len(deletion_requests)
+    deletion_count = User.get_deletion_requests_count()
     return render_template('admin/users.html', users=users, total=total, page=page,
                            search=search, status=status, admin=get_current_admin(),
                            deletion_count=deletion_count)

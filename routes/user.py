@@ -81,11 +81,10 @@ def mark_all_notifications_read():
 @user_bp.route('/profile')
 @user_required
 def profile():
-    user = User.get_by_id(session['user_id'])
+    user = get_current_user()
     from models.material import Favorite
-    _, fav_total = Favorite.get_by_user(session['user_id'], page=1, per_page=1)
-    user['favorites_count'] = fav_total
-    return render_template('user/profile.html', user=user, current_user=get_current_user())
+    user['favorites_count'] = Favorite.count_by_user(session['user_id'])
+    return render_template('user/profile.html', user=user, current_user=user)
 
 @user_bp.route('/favorites')
 @user_required

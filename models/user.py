@@ -241,6 +241,21 @@ class User:
         finally:
             close_cursor(cursor)
             conn.close()
+
+    @staticmethod
+    def get_deletion_requests_count():
+        conn = get_connection()
+        cursor = None
+        try:
+            cursor = get_cursor(conn)
+            cursor.execute(
+                "SELECT COUNT(*) as total FROM users "
+                "WHERE deleted_by_user = 1 AND deletion_processed IS NULL"
+            )
+            return cursor.fetchone()['total']
+        finally:
+            close_cursor(cursor)
+            conn.close()
     
     @staticmethod
     def mark_deletion_processed(user_id, conn=None):

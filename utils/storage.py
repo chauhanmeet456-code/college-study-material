@@ -3,10 +3,13 @@
 import hashlib
 import logging
 import os
+import threading
+import time
 
 import boto3
 from botocore.config import Config as BotoConfig
 from botocore.exceptions import BotoCoreError, ClientError
+from flask import g, has_request_context
 
 from config import Config
 
@@ -14,6 +17,8 @@ from config import Config
 logger = logging.getLogger('studyhub.storage')
 B2_PATH_PREFIX = 'b2://'
 _CHUNK_SIZE = 1024 * 1024
+_storage_instance = None
+_storage_lock = threading.Lock()
 
 
 class B2StorageError(Exception):
@@ -42,9 +47,25 @@ def _client_error_message(operation, exc):
     return 'Backblaze B2 {} failed ({}).'.format(operation, code)
 
 
+def _record_storage_timing(operation, elapsed_ms):
+    if not has_request_context():
+        return
+    metrics = getattr(g, 'storage_timings', None)
+    if metrics is None:
+        metrics = {}
+        g.storage_timings = metrics
+    metrics['{}_count'.format(operation)] = (
+        metrics.get('{}_count'.format(operation), 0) + 1
+    )
+    metrics['{}_ms'.format(operation)] = (
+        metrics.get('{}_ms'.format(operation), 0.0) + elapsed_ms
+    )
+
+
 class B2Storage:
     def __init__(self):
         self._s3 = None
+        self._client_lock = threading.Lock()
 
     @property
     def is_configured(self):
@@ -66,25 +87,29 @@ class B2Storage:
                 'Backblaze B2 is not configured. Set all B2_* Render environment variables.'
             )
         if self._s3 is None:
-            try:
-                self._s3 = boto3.client(
-                    's3',
-                    endpoint_url=Config.B2_ENDPOINT_URL,
-                    aws_access_key_id=Config.B2_KEY_ID,
-                    aws_secret_access_key=Config.B2_APPLICATION_KEY,
-                    region_name=Config.B2_REGION,
-                    config=BotoConfig(
-                        signature_version='s3v4',
-                        s3={'addressing_style': 'path'},
-                        retries={'max_attempts': 3, 'mode': 'standard'},
-                    ),
-                )
-            except (BotoCoreError, ValueError) as exc:
-                if log_errors:
-                    logger.exception('Could not initialize the Backblaze S3 client.')
-                raise B2StorageError(
-                    'Could not initialize the Backblaze B2 connection.'
-                ) from exc
+            with self._client_lock:
+                if self._s3 is None:
+                    try:
+                        self._s3 = boto3.client(
+                            's3',
+                            endpoint_url=Config.B2_ENDPOINT_URL,
+                            aws_access_key_id=Config.B2_KEY_ID,
+                            aws_secret_access_key=Config.B2_APPLICATION_KEY,
+                            region_name=Config.B2_REGION,
+                            config=BotoConfig(
+                                signature_version='s3v4',
+                                s3={'addressing_style': 'path'},
+                                retries={'max_attempts': 3, 'mode': 'standard'},
+                            ),
+                        )
+                    except (BotoCoreError, ValueError) as exc:
+                        if log_errors:
+                            logger.exception(
+                                'Could not initialize the Backblaze S3 client.'
+                            )
+                        raise B2StorageError(
+                            'Could not initialize the Backblaze B2 connection.'
+                        ) from exc
         return self._s3
 
     def check_bucket_access(self):
@@ -145,6 +170,7 @@ class B2Storage:
         return size, sha256
 
     def _head_object(self, key):
+        started = time.perf_counter()
         try:
             return self._client().head_object(Bucket=self.bucket_name, Key=key)
         except ClientError as exc:
@@ -156,6 +182,11 @@ class B2Storage:
         except BotoCoreError as exc:
             logger.exception('Backblaze HEAD failed for object key %s.', key)
             raise B2StorageError('Backblaze B2 object check failed.') from exc
+        finally:
+            _record_storage_timing(
+                'b2_head_object',
+                (time.perf_counter() - started) * 1000,
+            )
 
     def object_exists(self, key):
         return self._head_object(key) is not None
@@ -296,4 +327,9 @@ class B2Storage:
 
 
 def get_storage():
-    return B2Storage()
+    global _storage_instance
+    if _storage_instance is None:
+        with _storage_lock:
+            if _storage_instance is None:
+                _storage_instance = B2Storage()
+    return _storage_instance

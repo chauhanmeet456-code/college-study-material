@@ -7,6 +7,7 @@ import re
 from contextlib import contextmanager
 from datetime import datetime, date
 from urllib.parse import parse_qs, urlsplit
+from flask import g, has_request_context
 from config import Config
 import pymysql
 import psycopg
@@ -42,6 +43,8 @@ sqlite3.register_adapter(date, _adapt_datetime)
 _tls = threading.local()
 _pg_lock = threading.Lock()
 _transaction_logger = logging.getLogger("studyhub.database")
+_SLOW_DATABASE_OPERATION_MS = 250
+_POOL_HEALTHCHECK_INTERVAL_SECONDS = 5
 _DATABASE_URL_ERROR_PATTERN = re.compile(
     r"(?i)\b(?:postgres(?:ql)?|mysql)://[^\s'\"<>]+"
 )
@@ -89,6 +92,127 @@ class MySQLCursorWrapper:
 
     def fetchall(self):
         return self._cursor.fetchall()
+
+    def close(self):
+        return self._cursor.close()
+
+    def __getattr__(self, name):
+        return getattr(self._cursor, name)
+
+
+def _query_label(query):
+    operation = re.match(r'\s*([A-Za-z]+)', str(query))
+    table = re.search(
+        r'\b(?:FROM|JOIN|UPDATE|INTO)\s+["`]?([A-Za-z_][A-Za-z0-9_]*)',
+        str(query),
+        re.IGNORECASE,
+    )
+    return '{}:{}'.format(
+        operation.group(1).upper() if operation else 'SQL',
+        table.group(1) if table else 'unknown',
+    )
+
+
+def _record_database_timing(kind, elapsed_ms, label=None):
+    if not has_request_context():
+        return
+    metrics = getattr(g, 'database_metrics', None)
+    if metrics is None:
+        metrics = {
+            'acquire_count': 0,
+            'acquire_ms': 0.0,
+            'query_count': 0,
+            'execute_ms': 0.0,
+            'fetch_count': 0,
+            'fetch_ms': 0.0,
+            'query_ms': 0.0,
+            'slowest_query_ms': 0.0,
+            'slowest_query': '',
+            'slowest_operation': '',
+        }
+        g.database_metrics = metrics
+    if kind == 'acquire':
+        metrics['acquire_count'] += 1
+        metrics['acquire_ms'] += elapsed_ms
+        return
+    if kind == 'query':
+        metrics['query_count'] += 1
+        metrics['execute_ms'] += elapsed_ms
+    elif kind == 'fetch':
+        metrics['fetch_count'] += 1
+        metrics['fetch_ms'] += elapsed_ms
+    metrics['query_ms'] += elapsed_ms
+    if elapsed_ms > metrics['slowest_query_ms']:
+        metrics['slowest_query_ms'] = elapsed_ms
+        metrics['slowest_query'] = label or 'SQL:unknown'
+        metrics['slowest_operation'] = kind
+    if elapsed_ms >= _SLOW_DATABASE_OPERATION_MS:
+        _transaction_logger.warning(
+            'slow_database_operation request_id=%s elapsed_ms=%.1f '
+            'operation=%s query=%s',
+            getattr(g, 'request_id', 'unknown'),
+            elapsed_ms,
+            kind,
+            label or 'SQL:unknown',
+        )
+
+
+class TimedCursorWrapper:
+    def __init__(self, cursor):
+        self._cursor = cursor
+        self._query_label = 'SQL:unknown'
+
+    def execute(self, query, params=None):
+        started = time.perf_counter()
+        self._query_label = _query_label(query)
+        try:
+            if params is None:
+                return self._cursor.execute(query)
+            return self._cursor.execute(query, params)
+        finally:
+            _record_database_timing(
+                'query',
+                (time.perf_counter() - started) * 1000,
+                self._query_label,
+            )
+
+    def executemany(self, query, params=None):
+        started = time.perf_counter()
+        self._query_label = 'MANY:{}'.format(
+            _query_label(query).split(':', 1)[-1]
+        )
+        try:
+            if params is None:
+                return self._cursor.executemany(query)
+            return self._cursor.executemany(query, params)
+        finally:
+            _record_database_timing(
+                'query',
+                (time.perf_counter() - started) * 1000,
+                self._query_label,
+            )
+
+    def fetchone(self):
+        started = time.perf_counter()
+        try:
+            return self._cursor.fetchone()
+        finally:
+            _record_database_timing(
+                'fetch',
+                (time.perf_counter() - started) * 1000,
+                self._query_label,
+            )
+
+    def fetchall(self):
+        started = time.perf_counter()
+        try:
+            return self._cursor.fetchall()
+        finally:
+            _record_database_timing(
+                'fetch',
+                (time.perf_counter() - started) * 1000,
+                self._query_label,
+            )
 
     def close(self):
         return self._cursor.close()
@@ -404,6 +528,13 @@ class PostgreSQLConnectionPool:
     def _prepare_for_reuse(cls, conn):
         if not cls._reset_transaction(conn):
             return False
+        last_used = getattr(conn, "_studyhub_last_used", None)
+        if (
+            last_used is not None
+            and time.time() - last_used < _POOL_HEALTHCHECK_INTERVAL_SECONDS
+        ):
+            conn._studyhub_last_used = time.time()
+            return True
         cursor = None
         try:
             cursor = conn.execute("SELECT 1")
@@ -559,57 +690,63 @@ def get_connection():
     database call.  The pooled connection is returned to the pool when
     ``conn.close()`` is called.
     """
-    if Config.USE_SQLITE:
-        os.makedirs(os.path.dirname(Config.SQLITE_DB), exist_ok=True)
-        conn = sqlite3.connect(Config.SQLITE_DB, timeout=30)
-        conn.row_factory = dict_factory
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA busy_timeout = 30000")
-        return conn
-    if Config.DATABASE_CONFIG_ERROR:
-        raise DatabaseConnectionError(Config.DATABASE_CONFIG_ERROR)
-    if Config.USE_POSTGRES:
-        conn = _pg_pool.get()
-        return PooledConnection(conn, _pg_pool)
-    if not any(os.getenv(key) for key in ('DB_HOST', 'DB_NAME', 'DB_USER')):
-        raise DatabaseConnectionError(
-            'No database is configured. Set DEV_DATABASE_URL locally or '
-            'DATABASE_URL on Render.'
-        )
+    started = time.perf_counter()
     try:
-        conn = pymysql.connect(
-            host=Config.MYSQL_HOST,
-            port=Config.MYSQL_PORT,
-            user=Config.MYSQL_USER,
-            password=Config.MYSQL_PASSWORD,
-            database=Config.MYSQL_DB,
-            cursorclass=pymysql.cursors.DictCursor,
-            connect_timeout=Config.DB_CONNECT_TIMEOUT,
+        if Config.USE_SQLITE:
+            os.makedirs(os.path.dirname(Config.SQLITE_DB), exist_ok=True)
+            conn = sqlite3.connect(Config.SQLITE_DB, timeout=30)
+            conn.row_factory = dict_factory
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("PRAGMA busy_timeout = 30000")
+            return conn
+        if Config.DATABASE_CONFIG_ERROR:
+            raise DatabaseConnectionError(Config.DATABASE_CONFIG_ERROR)
+        if Config.USE_POSTGRES:
+            conn = _pg_pool.get()
+            return PooledConnection(conn, _pg_pool)
+        if not any(os.getenv(key) for key in ('DB_HOST', 'DB_NAME', 'DB_USER')):
+            raise DatabaseConnectionError(
+                'No database is configured. Set DEV_DATABASE_URL locally or '
+                'DATABASE_URL on Render.'
+            )
+        try:
+            return pymysql.connect(
+                host=Config.MYSQL_HOST,
+                port=Config.MYSQL_PORT,
+                user=Config.MYSQL_USER,
+                password=Config.MYSQL_PASSWORD,
+                database=Config.MYSQL_DB,
+                cursorclass=pymysql.cursors.DictCursor,
+                connect_timeout=Config.DB_CONNECT_TIMEOUT,
+            )
+        except pymysql.err.OperationalError as exc:
+            error_code = exc.args[0] if exc.args else None
+            if error_code == 1045:
+                message = (
+                    'MySQL authentication failed for the configured local database '
+                    'account. Verify DB_USER and DB_PASSWORD in .env; no credentials '
+                    'were logged.'
+                )
+            elif error_code in (2002, 2003, 2006, 2013):
+                message = (
+                    'The configured MySQL server is unavailable or refused the '
+                    'connection. Verify DB_HOST, DB_PORT, and that MySQL is running.'
+                )
+            else:
+                message = (
+                    'MySQL connection failed (error code {}). Verify the local '
+                    'database settings in .env.'.format(error_code or 'unknown')
+                )
+            _transaction_logger.error(
+                'MySQL connection failed (error code %s)',
+                error_code or 'unknown',
+            )
+            raise DatabaseConnectionError(message) from None
+    finally:
+        _record_database_timing(
+            'acquire',
+            (time.perf_counter() - started) * 1000,
         )
-    except pymysql.err.OperationalError as exc:
-        error_code = exc.args[0] if exc.args else None
-        if error_code == 1045:
-            message = (
-                'MySQL authentication failed for the configured local database '
-                'account. Verify DB_USER and DB_PASSWORD in .env; no credentials '
-                'were logged.'
-            )
-        elif error_code in (2002, 2003, 2006, 2013):
-            message = (
-                'The configured MySQL server is unavailable or refused the '
-                'connection. Verify DB_HOST, DB_PORT, and that MySQL is running.'
-            )
-        else:
-            message = (
-                'MySQL connection failed (error code {}). Verify the local '
-                'database settings in .env.'.format(error_code or 'unknown')
-            )
-        _transaction_logger.error(
-            'MySQL connection failed (error code %s)',
-            error_code or 'unknown',
-        )
-        raise DatabaseConnectionError(message) from None
-    return conn
 
 
 def get_cursor(conn):
@@ -618,7 +755,7 @@ def get_cursor(conn):
         cursor = PostgresCursorWrapper(cursor)
     elif not Config.USE_SQLITE:
         cursor = MySQLCursorWrapper(cursor)
-    return cursor
+    return TimedCursorWrapper(cursor)
 
 
 def close_cursor(cursor):

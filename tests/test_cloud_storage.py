@@ -2,11 +2,12 @@ import hashlib
 import io
 
 import pytest
+from flask import Flask, g
 from botocore.exceptions import ClientError
 from werkzeug.datastructures import FileStorage
 
 from config import Config
-from utils.storage import B2Storage, B2StorageError, b2_key
+from utils.storage import B2Storage, B2StorageError, b2_key, get_storage
 
 
 class FakePaginator:
@@ -163,6 +164,31 @@ def test_presigned_url_is_private_and_uses_configured_expiry(b2, monkeypatch):
         'attachment; filename="study.pdf"'
     )
     assert client.signed_args[2] == 300
+
+
+def test_storage_client_is_reused_and_b2_head_is_timed(b2, monkeypatch):
+    import utils.storage as storage_module
+
+    _, client = b2
+    created_clients = []
+    monkeypatch.setattr(
+        storage_module.boto3,
+        'client',
+        lambda *args, **kwargs: created_clients.append(client) or client,
+    )
+    monkeypatch.setattr(storage_module, '_storage_instance', None)
+
+    storage = get_storage()
+    assert get_storage() is storage
+    assert storage._client() is client
+    assert storage._client() is client
+    assert len(created_clients) == 1
+
+    app = Flask(__name__)
+    with app.test_request_context('/material/1'):
+        assert storage.object_exists('materials/missing.pdf') is False
+        assert g.storage_timings['b2_head_object_count'] == 1
+        assert g.storage_timings['b2_head_object_ms'] >= 0
 
 
 def test_deletion_purges_versions_and_markers_for_exact_key(b2):
