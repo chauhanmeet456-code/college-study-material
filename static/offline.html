@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#2563eb">
+  <title>You're offline - StudyHub</title>
+  <style>
+    body {
+      align-items: center;
+      background: #f8fafc;
+      color: #1e293b;
+      display: flex;
+      font: 16px/1.6 system-ui, sans-serif;
+      justify-content: center;
+      margin: 0;
+      min-height: 100vh;
+      padding: 1.5rem;
+      text-align: center;
+    }
+    main { max-width: 32rem; }
+    h1 { color: #2563eb; }
+    button {
+      background: #2563eb;
+      border: 0;
+      border-radius: .5rem;
+      color: white;
+      cursor: pointer;
+      font: inherit;
+      padding: .65rem 1rem;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>You're offline</h1>
+    <p>StudyHub couldn't reach the website. Check your connection and try again.</p>
+    <button type="button" onclick="location.reload()">Try again</button>
+  </main>
+</body>
+</html>

@@ -8,6 +8,8 @@
 <meta name="robots" content="noindex, nofollow">
 {% set social_title = site_name %}
 {% set social_description = "Study materials and course resources from StudyHub." %}
+{% elif not seo_context.get('is_indexable_page', true) %}
+<meta name="robots" content="{{ meta_robots|default('noindex, follow', true)|plain_meta }}">
 {% else %}
 <meta name="robots" content="{{ meta_robots|default('index, follow', true)|plain_meta }}">
 {% endif %}

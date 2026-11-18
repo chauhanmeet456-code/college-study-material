@@ -278,19 +278,33 @@ Visit: https://college-study-material.onrender.com
 
 ### Open Graph and canonical URLs
 
-Set `PUBLIC_BASE_URL` to the canonical production origin (for example,
-`https://studyhub.your-domain.tld`, without a path or trailing slash). StudyHub
-uses it to emit absolute canonical, Open Graph, Twitter/X, and preview-image
-URLs; it deliberately does not publish localhost or request-host URLs when the
-setting is absent or invalid in production. In local testing/debug, a loopback
-origin may be used for local rendering only; it is never accepted as a
-production canonical origin. Production must use the exact public HTTPS domain,
-not a localhost address or temporary development tunnel. Put the default
-1200 × 630 preview image at
+StudyHub uses `PUBLIC_BASE_URL` (an origin only, without a path or trailing
+slash) to emit absolute canonical, Open Graph, Twitter/X, and preview-image
+URLs. The supplied Render deployment falls back to
+`https://college-study-material.onrender.com` when this setting is empty; set
+`PUBLIC_BASE_URL` explicitly when using a custom domain. Local testing/debug may
+use a loopback origin for local rendering only. Put the default 1200 × 630
+preview image at
 `static/images/og-studyhub.png`. Replace that file to customize the shared
 preview image. Public material and subject pages use their own titles and
 descriptions, and Login and Registration have dedicated metadata. Private
 account/admin pages use generic metadata and are marked `noindex`.
+
+### Crawling, PWA, and caching
+
+`/robots.txt` and `/sitemap.xml` are served by Flask. The sitemap includes
+public informational/category pages and active subjects/material detail pages;
+it never lists upload, PDF, stream, or download URLs. Search results and
+account/admin/API routes are not indexable.
+
+The public site registers `/service-worker.js` and links
+`static/manifest.webmanifest`. The worker may cache allowlisted static assets
+and the offline fallback only. It does not cache page HTML, PDFs, uploads,
+admin/login pages, APIs, or authenticated responses. Dynamic responses use
+`private, no-store`; public assets with content-hash query strings use
+long-lived immutable browser caching. When changing the worker's cache
+structure, increment `STATIC_CACHE` in `static/service-worker.js`; activation
+removes older `studyhub-*` caches.
 
 ### Legal pages
 

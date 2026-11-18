@@ -61,6 +61,8 @@ PAGE_DESCRIPTIONS = {
 
 def _public_origin():
     configured = current_app.config.get('PUBLIC_BASE_URL')
+    if not configured and current_app.config.get('IS_RENDER'):
+        configured = 'https://college-study-material.onrender.com'
     if not isinstance(configured, str):
         return ''
     configured = configured.strip()
@@ -151,6 +153,7 @@ def absolute_public_url(path):
 def build_seo_context():
     endpoint = request.endpoint or ''
     is_public = endpoint in PUBLIC_ENDPOINTS
+    is_indexable = is_public and endpoint != 'main.search'
 
     if is_public:
         try:
@@ -166,20 +169,18 @@ def build_seo_context():
         current_app.static_folder or '',
         image_filename.replace('/', os.sep),
     )
+    origin = _public_origin()
+    image_url = (
+        origin + image_path
+        if origin and is_public and os.path.isfile(image_file)
+        else ''
+    )
     return {
         'is_public_page': is_public,
-        'canonical_url': absolute_public_url(path) if is_public else '',
-        'og_image_url': (
-            absolute_public_url(image_path)
-            if is_public and os.path.isfile(image_file)
-            else ''
-        ),
-        'og_image_secure_url': (
-            absolute_public_url(image_path)
-            if is_public and os.path.isfile(image_file)
-            and _public_origin().startswith('https://')
-            else ''
-        ),
+        'is_indexable_page': is_indexable,
+        'canonical_url': origin + path if origin and is_public else '',
+        'og_image_url': image_url,
+        'og_image_secure_url': image_url if image_url.startswith('https://') else '',
         'og_image_type': 'image/png',
         'og_image_alt': 'StudyHub - college study materials and course resources',
         'default_meta_description': PAGE_DESCRIPTIONS.get(

@@ -1,13 +1,16 @@
 import logging
+import hashlib
 import os
 import time
 from datetime import datetime, timedelta
+from functools import lru_cache
 
 _session_logger = logging.getLogger('studyhub.session')
 _app_logger = logging.getLogger('studyhub.app')
 
 from flask import (
     Flask,
+    current_app,
     flash,
     g,
     redirect,
@@ -72,6 +75,9 @@ SKIP_SESSION_CHECK_ENDPOINTS = {
     'main.raw_material_file',
     'main.serve_uploaded_file',
     'main.save_cookie_consent',
+    'main.robots_txt',
+    'main.sitemap_xml',
+    'main.service_worker',
 }
 
 ACTIVITY_TOUCH_INTERVAL_SECONDS = 60
@@ -129,6 +135,7 @@ def create_app():
             ),
             "seo": build_seo_context(),
             "google_oauth_enabled": google_oauth_enabled(),
+            "static_asset_url": _static_asset_url,
         }
 
     @app.context_processor
@@ -167,7 +174,86 @@ def create_app():
 
     @app.after_request
     def add_security_headers(response):
-        return apply_security_headers(response)
+        apply_security_headers(response)
+        if Config.IS_RENDER:
+            response.headers.setdefault(
+                'Strict-Transport-Security', 'max-age=31536000'
+            )
+        return response
+
+    @app.after_request
+    def add_cache_headers(response):
+        endpoint = request.endpoint or ''
+        path = request.path.lower()
+
+        if response.status_code >= 400:
+            response.headers['Cache-Control'] = 'private, no-store'
+        elif endpoint == 'main.robots_txt':
+            response.headers['Cache-Control'] = 'public, max-age=3600'
+        elif endpoint == 'main.sitemap_xml':
+            response.headers['Cache-Control'] = 'public, max-age=300'
+        elif endpoint == 'main.service_worker':
+            response.headers['Cache-Control'] = 'no-cache'
+        elif (
+            endpoint == 'static'
+            and '/uploads/' not in path
+            and os.path.splitext(path)[1] in {
+                '.css', '.js', '.png', '.svg', '.webp', '.woff', '.woff2',
+                '.webmanifest',
+            }
+        ):
+            static_path = os.path.realpath(
+                os.path.join(
+                    app.static_folder,
+                    request.path[len('/static/'):].replace('/', os.sep),
+                )
+            )
+            static_root = os.path.realpath(app.static_folder)
+            try:
+                is_within_static = (
+                    os.path.commonpath((static_root, static_path)) == static_root
+                )
+                stat = os.stat(static_path) if is_within_static else None
+            except (OSError, ValueError):
+                stat = None
+            version = request.args.get('v')
+            expected_version = (
+                _static_asset_version(
+                    static_path, stat.st_mtime_ns, stat.st_size
+                )
+                if stat is not None
+                else None
+            )
+            if expected_version and version == expected_version:
+                response.headers['Cache-Control'] = (
+                    'public, max-age=31536000, immutable'
+                )
+            else:
+                response.headers['Cache-Control'] = (
+                    'public, max-age=0, must-revalidate'
+                )
+        else:
+            response.headers['Cache-Control'] = 'private, no-store'
+
+        if (
+            response.status_code >= 400
+            or endpoint.startswith(('admin.', 'auth.', 'user.'))
+            or endpoint.startswith('api.')
+            or endpoint in {
+                'main.api_search',
+                'main.api_search_suggestions',
+                'main.api_toggle_favorite',
+                'main.raw_material_file',
+                'main.download_material',
+                'main.view_material',
+                'main.serve_uploaded_file',
+                'user.notifications_api',
+            }
+            or request.path.startswith('/api/')
+            or '/uploads/' in path
+        ):
+            response.headers.setdefault('X-Robots-Tag', 'noindex, nofollow')
+        return response
 
     @app.before_request
     def enforce_session_validity():
@@ -346,6 +432,24 @@ def create_app():
 
 def _now_helper():
     return datetime.now()
+
+
+@lru_cache(maxsize=128)
+def _static_asset_version(path, modified_ns, size):
+    with open(path, 'rb') as asset_file:
+        return hashlib.sha256(asset_file.read()).hexdigest()[:16]
+
+
+def _static_asset_url(filename):
+    static_root = os.path.realpath(current_app.static_folder)
+    asset_path = os.path.realpath(
+        os.path.join(static_root, filename.replace('/', os.sep))
+    )
+    if os.path.commonpath((static_root, asset_path)) != static_root:
+        raise ValueError('Static asset path must remain inside the static folder.')
+    stat = os.stat(asset_path)
+    version = _static_asset_version(asset_path, stat.st_mtime_ns, stat.st_size)
+    return url_for('static', filename=filename, v=version)
 
 
 def _is_admin_endpoint(endpoint):

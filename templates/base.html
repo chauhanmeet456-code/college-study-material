@@ -7,19 +7,37 @@
     <link rel="preconnect" href="https://cdn.jsdelivr.net">
     <link rel="preconnect" href="https://cdnjs.cloudflare.com">
     <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
     <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com">
     <link rel="dns-prefetch" href="https://fonts.googleapis.com">
+    <meta name="theme-color" content="#2563eb">
     <title>{% block title %}College Study Material{% endblock %}</title>
     {% set seo_context = seo|default({}, true) %}
     {% if seo_context is not mapping %}{% set seo_context = {} %}{% endif %}
     {% set social_title = meta_title|default(self.title()|striptags|trim, true)|plain_meta %}
     {% set social_description = meta_description|default(seo_context.get('default_meta_description', 'Explore college study materials and course resources on StudyHub.'), true)|plain_meta %}
     {% include "partials/social_metadata.html" %}
+    {% if request.endpoint == 'main.index' and seo_context.get('canonical_url') %}
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": {{ app_name|tojson }},
+      "url": {{ seo_context.get('canonical_url')|tojson }},
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": {{ (seo_context.get('canonical_url').rstrip('/') + '/search?q={search_term_string}')|tojson }},
+        "query-input": "required name=search_term_string"
+      }
+    }
+    </script>
+    {% endif %}
+    <link rel="manifest" href="{{ static_asset_url('manifest.webmanifest') }}">
     {% block favicon %}
-    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicons/favicon.svg') }}">
+    <link rel="icon" type="image/svg+xml" href="{{ static_asset_url('favicons/favicon.svg') }}">
     {% endblock %}
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/cookie-consent.css') }}">
+    <link rel="stylesheet" href="{{ static_asset_url('css/cookie-consent.css') }}">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -559,7 +577,8 @@
     {% if current_user %}
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" defer></script>
     {% endif %}
-    <script src="{{ url_for('static', filename='js/studyhub.js') }}" defer></script>
+    <script src="{{ static_asset_url('js/studyhub.js') }}" defer></script>
+    <script src="{{ static_asset_url('js/pwa.js') }}" defer></script>
     {% block extra_js %}{% endblock %}
 
     {# Session-revocation popup: shows a modal to a user whose session was

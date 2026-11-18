@@ -3,6 +3,8 @@ import mimetypes
 import os
 import re
 import urllib.parse
+import xml.etree.ElementTree as ET
+from datetime import date, datetime
 from flask import (
     Blueprint,
     abort,
@@ -37,6 +39,7 @@ from utils.cookie_consent import (
 )
 from utils.helpers import positive_query_int
 from utils.storage import B2_PATH_PREFIX, B2StorageError, b2_key, get_storage
+from utils.seo import absolute_public_url
 
 logger = logging.getLogger('studyhub.main')
 main_bp = Blueprint('main', __name__)
@@ -572,6 +575,137 @@ def favicon():
         if os.path.isfile(os.path.join(directory, filename)):
             return send_from_directory(directory, filename, mimetype=mimetype)
     abort(404)
+
+
+@main_bp.route('/robots.txt')
+def robots_txt():
+    sitemap_url = absolute_public_url(url_for('main.sitemap_xml'))
+    lines = [
+        'User-agent: *',
+        'Allow: /',
+        'Disallow: /admin',
+        'Disallow: /login',
+        'Disallow: /register',
+        'Disallow: /forgot-password',
+        'Disallow: /reset-password',
+        'Disallow: /profile',
+        'Disallow: /favorites',
+        'Disallow: /notifications',
+        'Disallow: /account',
+        'Disallow: /api/',
+        'Disallow: /uploads/',
+        'Disallow: /static/uploads/',
+        'Disallow: /material/*/file',
+        'Disallow: /material/*/stream',
+        'Disallow: /material/*/download',
+    ]
+    if sitemap_url:
+        lines.extend(('', 'Sitemap: {}'.format(sitemap_url)))
+    return current_app.response_class(
+        '\n'.join(lines) + '\n',
+        mimetype='text/plain',
+    )
+
+
+def _sitemap_lastmod(value):
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if not value:
+        return None
+    text = str(value).strip()
+    try:
+        return datetime.fromisoformat(
+            text.replace('Z', '+00:00')
+        ).date().isoformat()
+    except ValueError:
+        try:
+            return date.fromisoformat(text[:10]).isoformat()
+        except ValueError:
+            return None
+
+
+@main_bp.route('/sitemap.xml')
+def sitemap_xml():
+    namespace = 'http://www.sitemaps.org/schemas/sitemap/0.9'
+    ET.register_namespace('', namespace)
+    urlset = ET.Element('{{{}}}urlset'.format(namespace))
+
+    def add_url(path, lastmod=None):
+        location = absolute_public_url(path)
+        if not location:
+            abort(503, description='The canonical public site URL is not configured.')
+        entry = ET.SubElement(urlset, '{{{}}}url'.format(namespace))
+        ET.SubElement(entry, '{{{}}}loc'.format(namespace)).text = location
+        formatted_lastmod = _sitemap_lastmod(lastmod)
+        if formatted_lastmod:
+            ET.SubElement(
+                entry, '{{{}}}lastmod'.format(namespace)
+            ).text = formatted_lastmod
+
+    public_endpoints = (
+        'main.index',
+        'main.subjects',
+        'main.notes_page',
+        'main.assignments_page',
+        'main.books_page',
+        'main.practicals_page',
+        'main.question_papers_page',
+        'main.important_questions_page',
+        'main.syllabus_page',
+        'main.about',
+        'main.cookie_policy',
+        'main.privacy_policy',
+        'main.terms_of_service',
+        'main.contact',
+    )
+    for endpoint in public_endpoints:
+        add_url(url_for(endpoint))
+
+    conn = get_connection()
+    cursor = None
+    try:
+        cursor = get_cursor(conn)
+        cursor.execute(
+            'SELECT id, updated_at FROM subjects '
+            'WHERE is_active = 1 ORDER BY id'
+        )
+        subjects = cursor.fetchall()
+        cursor.execute(
+            'SELECT id, updated_at FROM materials '
+            'WHERE is_active = 1 ORDER BY id'
+        )
+        materials = cursor.fetchall()
+    finally:
+        close_cursor(cursor)
+        conn.close()
+
+    for subject in subjects:
+        add_url(
+            url_for('main.subject_details', subject_id=subject['id']),
+            subject.get('updated_at'),
+        )
+    for material in materials:
+        add_url(
+            url_for('main.material_details', material_id=material['id']),
+            material.get('updated_at'),
+        )
+
+    xml = ET.tostring(urlset, encoding='utf-8', xml_declaration=True)
+    return current_app.response_class(xml, mimetype='application/xml')
+
+
+@main_bp.route('/service-worker.js')
+def service_worker():
+    response = send_from_directory(
+        current_app.static_folder,
+        'service-worker.js',
+        mimetype='application/javascript',
+    )
+    response.headers['Service-Worker-Allowed'] = '/'
+    return response
+
 
 @main_bp.route('/notes')
 def notes_page():

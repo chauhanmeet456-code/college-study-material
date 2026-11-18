@@ -1,4 +1,7 @@
 import sqlite3
+import json
+import re
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from html.parser import HTMLParser
@@ -68,7 +71,8 @@ def feature_app(tmp_path_factory):
         );
         CREATE TABLE subjects (
             id INTEGER PRIMARY KEY, name TEXT NOT NULL, code TEXT,
-            is_active INTEGER DEFAULT 1
+            is_active INTEGER DEFAULT 1,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE materials (
             id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL,
@@ -76,6 +80,7 @@ def feature_app(tmp_path_factory):
             file_name TEXT, file_path TEXT, file_type TEXT, file_size INTEGER,
             uploaded_by INTEGER, is_featured INTEGER DEFAULT 0,
             uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             is_active INTEGER DEFAULT 1
         );
         CREATE TABLE settings (
@@ -88,11 +93,13 @@ def feature_app(tmp_path_factory):
                    (3, 'Disabled', 'disabled@example.test', 'x', 0, 0);
         INSERT INTO categories (id, name) VALUES
             (1, 'Notes'), (2, 'Assignment'), (3, 'Book'), (4, 'Practical');
-        INSERT INTO subjects (id, name, code, is_active)
-            VALUES (1, 'Mathematics', 'MATH', 1);
+        INSERT INTO subjects (id, name, code, is_active, updated_at)
+            VALUES (1, 'Mathematics', 'MATH', 1, '2025-01-02 03:04:05');
         INSERT INTO materials
-            (id, title, description, subject_id, category_id, file_name, is_active)
-            VALUES (1, '100% Algebra Notes', 'Review', 1, 1, 'algebra.pdf', 1);
+            (id, title, description, subject_id, category_id, file_name,
+             is_active, updated_at)
+            VALUES (1, '100% Algebra Notes', 'Review', 1, 1, 'algebra.pdf',
+                    1, '2025-01-03 04:05:06');
     """)
     conn.commit()
     conn.close()
@@ -450,6 +457,15 @@ def test_public_pages_have_absolute_page_specific_social_metadata(feature_app):
     homepage_response = client.get('/')
     homepage_html = homepage_response.get_data(as_text=True)
     homepage_meta = _metadata(homepage_response)
+    structured_data = re.search(
+        r'<script type="application/ld\+json">\s*(.*?)\s*</script>',
+        homepage_html,
+        re.DOTALL,
+    )
+    assert structured_data
+    website_schema = json.loads(structured_data.group(1))
+    assert website_schema['@type'] == 'WebSite'
+    assert website_schema['url'] == production_origin + '/'
     homepage_title = next(
         line.split('<title>', 1)[1].split('</title>', 1)[0]
         for line in homepage_html.splitlines()
@@ -545,6 +561,132 @@ def test_public_pages_have_absolute_page_specific_social_metadata(feature_app):
         item['content'] for item in notes_meta
         if item.get('property') == 'og:url'
     ) == production_origin + '/notes'
+
+
+def test_robots_and_sitemap_only_publish_public_catalog_pages(feature_app):
+    production_origin = 'https://college-study-material.onrender.com'
+    feature_app.config['PUBLIC_BASE_URL'] = production_origin
+    conn = get_connection()
+    cursor = get_cursor(conn)
+    cursor.execute(
+        "INSERT INTO subjects (id, name, code, is_active) VALUES (?, ?, ?, ?)",
+        (2, 'Hidden Subject', 'HIDDEN', 0),
+    )
+    cursor.execute(
+        "INSERT INTO materials (id, title, subject_id, category_id, is_active) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (900, 'Inactive Material', 2, 1, 0),
+    )
+    conn.commit()
+    close_cursor(cursor)
+    conn.close()
+
+    client = feature_app.test_client()
+    robots = client.get('/robots.txt')
+    assert robots.status_code == 200
+    assert robots.mimetype == 'text/plain'
+    assert 'Disallow: /admin' in robots.get_data(as_text=True)
+    assert 'Disallow: /static/uploads/' in robots.get_data(as_text=True)
+    assert 'Sitemap: {}/sitemap.xml'.format(production_origin) in (
+        robots.get_data(as_text=True)
+    )
+
+    response = client.get('/sitemap.xml')
+    assert response.status_code == 200
+    assert response.mimetype == 'application/xml'
+    namespace = {'sm': 'http://www.sitemaps.org/schemas/sitemap/0.9'}
+    root = ET.fromstring(response.data)
+    locations = {
+        entry.find('sm:loc', namespace).text
+        for entry in root.findall('sm:url', namespace)
+    }
+    assert production_origin + '/' in locations
+    assert production_origin + '/subject/1' in locations
+    assert production_origin + '/material/1' in locations
+    assert not any(
+        '/admin' in location
+        or '/login' in location
+        or '/material/900' in location
+        or location.endswith('/file')
+        or '/uploads/' in location
+        for location in locations
+    )
+    material_entry = next(
+        entry for entry in root.findall('sm:url', namespace)
+        if entry.find('sm:loc', namespace).text.endswith('/material/1')
+    )
+    subject_entry = next(
+        entry for entry in root.findall('sm:url', namespace)
+        if entry.find('sm:loc', namespace).text.endswith('/subject/1')
+    )
+    assert subject_entry.find('sm:lastmod', namespace).text == '2025-01-02'
+    assert material_entry.find('sm:lastmod', namespace).text == '2025-01-03'
+
+
+def test_service_worker_manifest_and_safe_cache_headers(feature_app):
+    feature_app.config['PUBLIC_BASE_URL'] = (
+        'https://college-study-material.onrender.com'
+    )
+    client = feature_app.test_client()
+    homepage = client.get('/')
+    assert homepage.headers['Cache-Control'] == 'private, no-store'
+    html = homepage.get_data(as_text=True)
+
+    asset_match = re.search(
+        r'<script src="([^"]*static/js/studyhub\.js\?v=[^"]+)" defer></script>',
+        html,
+    )
+    assert asset_match
+    asset = client.get(asset_match.group(1))
+    assert asset.status_code == 200
+    assert 'immutable' in asset.headers['Cache-Control']
+
+    manifest_match = re.search(
+        r'<link rel="manifest" href="([^"]+)"', html
+    )
+    assert manifest_match
+    manifest = client.get(manifest_match.group(1))
+    assert manifest.status_code == 200
+    assert manifest.mimetype == 'application/manifest+json'
+
+    worker = client.get('/service-worker.js')
+    assert worker.status_code == 200
+    assert worker.headers['Service-Worker-Allowed'] == '/'
+    assert worker.headers['Cache-Control'] == 'no-cache'
+    worker_source = worker.get_data(as_text=True)
+    assert "studyhub-static-v1" in worker_source
+    assert "'/static/offline.html'" in worker_source
+    assert "url.pathname.includes('/uploads/')" in worker_source
+    assert client.get('/static/offline.html').status_code == 200
+    uploaded_file = client.get('/static/uploads/private-test.pdf')
+    assert uploaded_file.status_code == 404
+    assert uploaded_file.headers['Cache-Control'] == 'private, no-store'
+    assert uploaded_file.headers['X-Robots-Tag'] == 'noindex, nofollow'
+
+
+def test_search_results_are_noindex_and_deployed_origin_has_safe_fallback(
+    feature_app, monkeypatch,
+):
+    client = feature_app.test_client()
+    search_response = client.get('/search?q=algebra')
+    robots = [
+        item for item in _metadata(search_response)
+        if item.get('name') == 'robots'
+    ]
+    assert robots[0]['content'] == 'noindex, follow'
+
+    monkeypatch.setitem(feature_app.config, 'PUBLIC_BASE_URL', '')
+    monkeypatch.setitem(feature_app.config, 'IS_RENDER', True)
+    homepage = client.get('/')
+    html = homepage.get_data(as_text=True)
+    assert (
+        '<link rel="canonical" '
+        'href="https://college-study-material.onrender.com/">'
+    ) in html
+    assert (
+        '<meta property="og:image" '
+        'content="https://college-study-material.onrender.com/static/images/og-studyhub.png">'
+    ) in html
 
 
 def test_legal_pages_are_public_linked_and_have_complete_unique_metadata(feature_app):
@@ -786,7 +928,9 @@ def test_social_metadata_is_rendered_once_on_public_and_auth_pages(feature_app):
         assert sum(item.get('name') == 'robots' for item in metadata) == 1
         assert next(
             item['content'] for item in metadata if item.get('name') == 'robots'
-        ) == 'index, follow'
+        ) == (
+            'noindex, follow' if path.startswith('/search') else 'index, follow'
+        )
         assert (
             '<meta property="og:image" '
             'content="https://studyhub.example/static/images/og-studyhub.png">'
